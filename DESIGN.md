@@ -4010,3 +4010,9 @@ Clear context uses a custom confirmation in browser and desktop, matching Classi
 
 - Decision: The shared behavior diff review exposes both Architect and operator stages. Architect-stage decisions require an explicit eligible Architect identity from the proposal's group, honoring a target Engineer's hiring Architect when present. The reviewed note, text hash, scope, route and target are retained through failure/reconnect. A removed identity disables decisions without substituting another.
 - Routing: An Architect-only route applies on approval; Architect-then-user records endorsement and leaves operator approval pending. Acknowledgements must confirm the expected stage and acting identity. Refusal or an uncertain outcome requires a fresh diff before explicit retry. Backend authorization and proposal routes remain authoritative and unchanged.
+
+
+### D-240 — Quick verification respects completion and preserves authored review fields
+
+- Decision: Mark verified is offered only for Done tasks (including tasks archived from Done) whose saved verification state is pending or attempted, matching Classic. Manual verification fields remain editable independently.
+- Live editing: A changed timestamp for the selected task triggers an owned detail refresh because compact deltas omit evidence summaries; unrelated tasks and hidden editors trigger no reads, and superseded responses are ignored. The mounted task editor reconciles saved verification updates into untouched fields while preserving authored changes per summary key, note, mode and state. A received verification result is not a new edit: later unrelated saves cannot replay it over newer saved evidence. Acknowledged task saves advance the editor baseline even if subsequent attachment cleanup needs retry.

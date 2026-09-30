@@ -91,7 +91,8 @@ test('attachment cleanup follows acknowledged editing and can retry without repe
   await dialog.getByRole('button', { name: 'Remove attachment keep-until-saved.png', exact: true }).click();
   let failure = 'board_update_task'; const calls: string[] = [];
   await page.route('**/api/cmd', async (route) => {
-    const data = route.request().postDataJSON() as Row; calls.push(String(data.cmd));
+    const data = route.request().postDataJSON() as Row; if (data.cmd !== 'task_detail') calls.push(String(data.cmd));
+    else expect(data.id).toBe(id); // Live detail refreshes do not repeat a mutation.
     if (data.cmd === failure) await route.fulfill({ json: { ok: false, error: 'Injected edit failure' } });
     else await route.continue();
   });

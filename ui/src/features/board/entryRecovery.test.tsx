@@ -70,3 +70,15 @@ it('cancels an archive when its group is replaced and never publishes the obsole
   pending.resolve({ type: 'toast', level: 'success', message: 'Obsolete success' }); await flush(); expect(done).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: /Archive 1 completed/ })); await flush(); expect(read.mock.calls.at(-1)?.[0]).toEqual({ cmd: 'board_archive_tasks', ids: ['two'] }); expect(done).toHaveBeenCalledExactlyOnceWith({ type: 'toast', level: 'success', message: 'Current success' });
 });
+it('refreshes selected compact task evidence and ignores an older read overtaken by a newer task update', async () => {
+  let smoke = false;
+  read.mockImplementation((command) => Promise.resolve(command.cmd === 'list_actions' ? { type: 'actions', actions: [] } : command.cmd === 'list_roles' ? { type: 'roles', roles: [] } : { ...detail(), task: { ...detail().task as object, verification_state: smoke ? 'passed' : 'pending', verification_summary: { manual_smoke_done: smoke } } }));
+  const { store } = mountBoard(); await flush(); fireEvent.click(screen.getByRole('tab', { name: 'Verification' }));
+  const reads = () => read.mock.calls.filter(([command]) => command.cmd === 'task_detail').length; const initial = reads();
+  act(() => { store.dispatch(projectionActions.deltaReceived({ type: 'delta', seq: 11, ops: [{ op: 'task_upsert', id: 'other', updated_at: 'one' }] })); }); await flush(); expect(reads()).toBe(initial);
+  smoke = true; act(() => { store.dispatch(projectionActions.deltaReceived({ type: 'delta', seq: 12, ops: [{ op: 'task_upsert', id: 'one', updated_at: 'two', verification_state: 'passed' }] })); }); await flush();
+  expect(reads()).toBe(initial + 1); expect(screen.getByRole('checkbox', { name: 'Manual smoke done' })).toBeChecked();
+  const old = held(); read.mockReturnValueOnce(old.promise); act(() => { store.dispatch(projectionActions.deltaReceived({ type: 'delta', seq: 13, ops: [{ op: 'task_upsert', id: 'one', updated_at: 'three' }] })); }); await flush(); const obsolete = read.mock.calls.at(-1)![1];
+  act(() => { store.dispatch(projectionActions.deltaReceived({ type: 'delta', seq: 14, ops: [{ op: 'task_upsert', id: 'one', updated_at: 'four' }] })); }); await flush(); expect(obsolete.aborted).toBe(true);
+  old.resolve({ ...detail(), task: { ...detail().task as object, verification_summary: { manual_smoke_done: false } } }); await flush(); expect(screen.getByRole('checkbox', { name: 'Manual smoke done' })).toBeChecked();
+});

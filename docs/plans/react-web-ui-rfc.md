@@ -1616,3 +1616,8 @@ P-406/D-238 repairs inert external-ticket actions, routes saved links through th
 ### Architect-stage behavior acceptance
 
 P-407/D-239 restores explicit Architect approval/rejection with correct identity and saved approval-route handling. The UI gate passes 121 files / 1,111 tests plus lint/typecheck/build verification. Seven production-browser scenarios pass, including actual direct application, Architect endorsement that retains the operator gate, rejection, refusal/reconnect, and adjacent authoring/rollback/deadline cases; one unrelated opt-in PTY ask test was skipped. Ledger: 407 mapped / 403 accepted / no recorded open repairs / four retirements. Phase 4 remains open pending the remaining independent command/host audit and final complete browser gate.
+
+
+### Board verification acceptance
+
+P-408/P-409/D-240 restore Classic quick-verification eligibility and reconcile live verification state/evidence without losing authored drafts or replaying received fields. The UI gate passes 122 files / 1,118 tests; all nine scoped browser scenarios have passing evidence after correcting two fixture expectations. Ledger: 409 mapped / 405 accepted / no recorded open repairs / four retirements. The command audit has identified a deployment-status projection mismatch for the next repair; current native handoff and the final complete browser gate remain pending. Phase 4 remains open.

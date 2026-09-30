@@ -4,10 +4,10 @@ import { projectionActions } from '../../app/store';
 import type { UnknownRecord } from '../../protocol';
 import { boardReadRequest } from './boardReadRequest';
 
-export function useBoardTaskDetail(id: string | null, group: string, connected: boolean, reconnect: number) {
+export function useBoardTaskDetail(id: string | null, group: string, connected: boolean, reconnect: number, updatedAt = '') {
   const dispatch = useAppDispatch(); const [retry, setRetry] = useState(0);
   const [outcome, setOutcome] = useState({ key: '', error: '' });
-  const key = JSON.stringify([id, group, connected, reconnect, retry]);
+  const key = JSON.stringify([id, group, connected, reconnect, retry, updatedAt]);
   useEffect(() => {
     if (!id || !connected) return;
     const controller = new AbortController();

@@ -208,3 +208,18 @@ it('opens the saved external ticket from task details instead of dropping the se
   await waitFor(() => expect(opened).toHaveBeenCalledWith('https://example.invalid/1', '_blank', 'noopener,noreferrer'));
   expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ cmd: 'external_open_task' })); opened.mockRestore();
 });
+it.each([
+  { lane: 'Backlog', verification_state: 'pending' },
+  { lane: 'Done', verification_state: 'failed' },
+  { lane: 'Archived', archived_from_lane: 'Backlog', verification_state: 'pending' },
+])('does not offer quick verification for $lane/$verification_state', (task) => {
+  setup(task); expect(screen.queryByRole('button', { name: 'Mark verified' })).not.toBeInTheDocument(); fireEvent.click(screen.getByRole('tab', { name: 'Verification' })); expect(screen.queryByRole('button', { name: 'Mark verified' })).not.toBeInTheDocument(); expect(screen.getByRole('combobox', { name: 'State' })).toBeEnabled();
+});
+it('reflects acknowledged verification updates while retaining authored notes and saving only explicit changes', async () => {
+  const { store, calls, send } = setup({ lane: 'Done', verification_state: 'pending', verification_notes: 'Saved note', verification_summary: { tests_run: 'unit', manual_smoke_done: false, human_validation_pending: 'Smoke', deploy_needed: true } });
+  fireEvent.click(screen.getByRole('tab', { name: 'Verification' })); fireEvent.change(screen.getByRole('textbox', { name: 'Verification notes' }), { target: { value: 'Unsaved review note' } });
+  fireEvent.click(screen.getAllByRole('button', { name: 'Mark verified' })[0]!); expect(send).toHaveBeenCalledWith({ cmd: 'board_verify_task', id: 'task', actor_name: 'Operator', verification_state: 'passed', manual_smoke_done: true, human_validation_pending: '', deploy_needed: false });
+  act(() => { store.dispatch(projectionActions.taskDetailReceived({ type: 'task_detail', id: 'task', task: { verification_state: 'passed', verification_summary: { tests_run: 'external suite', manual_smoke_done: true, human_validation_pending: '', deploy_needed: false } } })); });
+  expect(screen.getByRole('combobox', { name: 'State' })).toHaveValue('passed'); expect(screen.getByRole('checkbox', { name: 'Manual smoke done' })).toBeChecked(); expect(screen.getByRole('textbox', { name: 'Tests run' })).toHaveValue('external suite'); expect(screen.getByRole('textbox', { name: 'Verification notes' })).toHaveValue('Unsaved review note'); expect(screen.queryByRole('button', { name: 'Mark verified' })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Save task' })); await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument()); expect(calls.at(-1)).toEqual({ cmd: 'board_update_task', id: 'task', verification_notes: 'Unsaved review note', enforce_dispatch_edit_gate: true });
+});

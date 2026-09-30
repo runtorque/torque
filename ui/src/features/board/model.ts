@@ -196,3 +196,9 @@ export function displayTime(value: string): string {
   if (Number.isNaN(parsed.getTime())) return value;
   return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(parsed);
 }
+
+/** Classic's quick completion review; manual verification editing is separate. */
+export function canMarkTaskVerified(task: BoardTask): boolean {
+  return (task.lane === 'Done' || task.lane === 'Archived' && task.raw.archived_from_lane === 'Done')
+    && ['pending', 'attempted'].includes(task.verificationState);
+}

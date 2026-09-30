@@ -17,7 +17,8 @@ import { ActionVariableFields } from './ActionVariableFields';
 import { actionVariableDefinitions, resolveActionVariables, useActionVariables } from './actionVariables';
 import { AskResponse } from '../attention/AskResponse';
 import { TaskCreateDialog } from './TaskCreateDialog';
-import { VerificationFields, type VerificationDraft } from './VerificationFields';
+import { VerificationFields } from './VerificationFields';
+import { useTaskVerificationDraft } from './useTaskVerificationDraft';
 import {
   DndContext,
   KeyboardSensor,
@@ -61,6 +62,7 @@ import {
   type DragLaneOrders,
 } from './drag';
 import {
+  canMarkTaskVerified,
   displayTime,
   emptyBoardFilters,
   normalizeFilters,
@@ -313,7 +315,7 @@ function SortableTaskCard({
           <ActionMenuItem onAction={onDuplicate}>Duplicate</ActionMenuItem>
           <ActionMenuItem onAction={onDispatch} isDisabled={dispatchLabel === 'Dispatched' || task.lane === 'Archived'}>{dispatchLabel}</ActionMenuItem>
           <ActionMenuItem onAction={onDone} isDisabled={task.lane === 'Done' || task.lane === 'Archived'}>Move to Done</ActionMenuItem>
-          <ActionMenuItem onAction={onVerify}>Mark verified</ActionMenuItem>
+          {canMarkTaskVerified(task) ? <ActionMenuItem onAction={onVerify}>Mark verified</ActionMenuItem> : null}
           <ActionMenuItem onAction={onDetach} isDisabled={!task.parentTaskId}>Detach from pipeline</ActionMenuItem>
           <ActionMenuItem onAction={onSync} isDisabled={!task.externalId && !task.externalUrl}>Sync external ticket</ActionMenuItem>
           <ActionMenuItem onAction={onOpenExternal} isDisabled={!task.externalUrl && !task.externalId}>Open external ticket</ActionMenuItem>
@@ -433,7 +435,9 @@ function TaskDetail({ task, tasks, groups, agents, responses, sendCommand, onCom
   const [externalUrl, setExternalUrl] = useState(task.externalUrl);
   const [syncBaseline, setSyncBaseline] = useState(task.boardSync);
   const [syncEnabled, setSyncEnabled] = useState(task.boardSync.enabled !== false && (Boolean(task.boardSync.enabled) || Boolean(task.boardSync.provider)));
-  const [verification, setVerification] = useState<VerificationDraft>({ mode: textValue(task.raw.verification_mode), state: task.verificationState, notes: textValue(task.raw.verification_notes), summary: record(task.raw.verification_summary) });
+  const verificationEditor = useTaskVerificationDraft({ mode: textValue(task.raw.verification_mode), state: task.verificationState, notes: textValue(task.raw.verification_notes), summary: record(task.raw.verification_summary) });
+  const verification = verificationEditor.draft;
+  const setVerification = verificationEditor.edit;
   const [attachments, setAttachments] = useState(task.attachments);
   const [removedAttachments, setRemovedAttachments] = useState<string[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -540,7 +544,8 @@ function TaskDetail({ task, tasks, groups, agents, responses, sendCommand, onCom
       let saved = false;
       try {
         const draft = draftFields();
-        const fields = taskEditChanges(baseline.current, draft, definitions, task.raw);
+        const verified = verificationEditor.baseline;
+        const fields = taskEditChanges({ ...baseline.current, verification_mode: verified.mode, verification_state: verified.state, verification_notes: verified.notes, verification_summary: verified.summary }, draft, definitions, task.raw);
         if (Object.keys(fields).length) {
           uncertainSave.current = true;
           try {
@@ -553,7 +558,7 @@ function TaskDetail({ task, tasks, groups, agents, responses, sendCommand, onCom
             throw cause;
           }
           uncertainSave.current = false; setUnknownSave(false);
-          baseline.current = draft;
+          baseline.current = draft; verificationEditor.saved(verification, verificationEditor.baseline);
           for (const key of ['attachments', 'artifacts'] as const) {
             if (key in fields) savedEvidence.current[key] = fields[key] as typeof artifacts;
           }
@@ -636,7 +641,7 @@ function TaskDetail({ task, tasks, groups, agents, responses, sendCommand, onCom
           </dl>
           <div className={styles.primaryTaskActions}>
             <Button tone="primary" type="button" onPress={() => sendOrNotify(sendCommand, { cmd: 'dispatch_task', id: task.id, ...(agentId ? { agent_id: agentId } : { create_agent: true }) }, onCommandUnavailable)} isDisabled={task.dispatchState === 'live' || task.lane === 'Archived'}>{task.dispatchState === 'live' ? 'Dispatched' : 'Dispatch task'}</Button>
-            <Button tone="quiet" type="button" onPress={() => sendOrNotify(sendCommand, { cmd: 'board_verify_task', id: task.id, actor_name: 'Operator', verification_state: 'passed', manual_smoke_done: true, human_validation_pending: '', deploy_needed: false }, onCommandUnavailable)}>Mark verified</Button>
+            {canMarkTaskVerified(task) ? <Button tone="quiet" type="button" onPress={() => sendOrNotify(sendCommand, { cmd: 'board_verify_task', id: task.id, actor_name: 'Operator', verification_state: 'passed', manual_smoke_done: true, human_validation_pending: '', deploy_needed: false }, onCommandUnavailable)}>Mark verified</Button> : null}
             {task.parentTaskId ? <Button tone="quiet" type="button" onPress={() => sendOrNotify(sendCommand, { cmd: 'board_update_task', id: task.id, parent_task_id: '', pipeline_depth: 0, pipeline_root_id: task.id, status: '', labels: task.labels.filter((label) => label !== 'torque:derived') }, onCommandUnavailable)}>Detach pipeline</Button> : null}
           </div>
         </aside>
@@ -657,7 +662,7 @@ function TaskDetail({ task, tasks, groups, agents, responses, sendCommand, onCom
         <ActionVariableFields definitions={definitions} value={actionVars} onChange={setActionVars} />
         <TaskPromptPreview disabled={saving || uploading || discardingUploads || artifactEditing} inputsKey={JSON.stringify([title, description, targetGroup, actionName, role, agentId, actionVars, definitions, attachments, artifacts, labels, verification])} command={() => ({ cmd: 'preview_prompt', id: task.id, task: title.trim(), description, group: targetGroup, action_name: actionName, agent_template: role, agent_id: agentId, action_vars: resolveActionVariables(actionVars, definitions), attachments, artifacts, labels: labels.split(',').map((label) => label.trim()).filter(Boolean), verification_mode: verification.mode, verification_state: verification.state, verification_notes: verification.notes, verification_summary: verification.summary })} />
       </section> : null}
-      {detailTab === 'verification' ? <section className={styles.detailSection} role="tabpanel" aria-label="Verification"><header><div><h3>Verification</h3><p>Record release gates and human checks for this task.</p></div><Button tone="quiet" type="button" onPress={() => sendOrNotify(sendCommand, { cmd: 'board_verify_task', id: task.id, actor_name: 'Operator', verification_state: 'passed', manual_smoke_done: true, human_validation_pending: '', deploy_needed: false }, onCommandUnavailable)}>Mark verified</Button></header><VerificationFields value={verification} onChange={setVerification} />{Object.keys(record(task.raw.completion_evidence)).length ? <details><summary>Completion evidence</summary><pre>{JSON.stringify(task.raw.completion_evidence, null, 2)}</pre></details> : null}</section> : null}
+      {detailTab === 'verification' ? <section className={styles.detailSection} role="tabpanel" aria-label="Verification"><header><div><h3>Verification</h3><p>Record release gates and human checks for this task.</p></div>{canMarkTaskVerified(task) ? <Button tone="quiet" type="button" onPress={() => sendOrNotify(sendCommand, { cmd: 'board_verify_task', id: task.id, actor_name: 'Operator', verification_state: 'passed', manual_smoke_done: true, human_validation_pending: '', deploy_needed: false }, onCommandUnavailable)}>Mark verified</Button> : null}</header><VerificationFields value={verification} onChange={setVerification} />{Object.keys(record(task.raw.completion_evidence)).length ? <details><summary>Completion evidence</summary><pre>{JSON.stringify(task.raw.completion_evidence, null, 2)}</pre></details> : null}</section> : null}
       {detailTab === 'integration' ? <section className={styles.detailSection} role="tabpanel" aria-label="Integrations"><header><div><h3>External ticket and sync</h3><p>Link, synchronize, or communicate with the provider ticket.</p></div>{task.externalUrl || task.externalId ? <Button tone="quiet" type="button" onPress={onOpenExternal}>Open ticket</Button> : null}</header><div className={styles.formGrid}><label>Provider<input value={provider} onChange={(event) => setProvider(event.target.value)} placeholder="github" /></label><label>External ID<input value={externalId} onChange={(event) => setExternalId(event.target.value)} placeholder="owner/repo#123" /></label><label>External URL<input value={externalUrl} onChange={(event) => setExternalUrl(event.target.value)} /></label><label className={styles.checkField}><input type="checkbox" checked={syncEnabled} onChange={(event) => setSyncEnabled(event.target.checked)} />Track with Board sync</label></div><div className={styles.taskActionRow}><Button tone="quiet" type="button" onPress={() => sendOrNotify(sendCommand, { cmd: 'board_sync_task', task: task.id }, onCommandUnavailable)} isDisabled={!externalId && !externalUrl}>Sync now</Button><Button tone="quiet" type="button" onPress={() => { setPullBaseline(pullResponse); setPullRequested(true); sendOrNotify(sendCommand, { cmd: 'board_pull_preview', task: task.id }, onCommandUnavailable); }} isDisabled={!externalId && !externalUrl}>Pull preview</Button><Button tone="quiet" type="button" onPress={() => { void externalAction('unlink'); }} isDisabled={!externalId && !externalUrl}>Unlink</Button></div>{Object.keys(pullChanges).length ? <div className={styles.pullPreview}><h4>Inbound changes</h4>{Object.entries(pullChanges).map(([field, value]) => <div key={field}><strong>{field}</strong><span>Local: {textValue(record(value).local)}</span><span>Remote: {textValue(record(value).remote)}</span></div>)}<Button tone="primary" type="button" onPress={() => sendOrNotify(sendCommand, { cmd: 'board_pull_apply', task: task.id, fields: Object.keys(pullChanges) }, onCommandUnavailable)}>Apply all changes</Button></div> : null}<div className={styles.externalComposer}><label>Push status<input value={externalStatus} onChange={(event) => setExternalStatus(event.target.value)} /></label><label>Optional status note<input value={externalStatusNote} onChange={(event) => setExternalStatusNote(event.target.value)} /></label><Button tone="quiet" type="button" onPress={() => sendOrNotify(sendCommand, { cmd: 'external_push_task_status', id: task.id, status: externalStatus.trim(), note: externalStatusNote.trim() }, onCommandUnavailable)} isDisabled={!externalStatus.trim() || (!externalId && !externalUrl)}>Push</Button><label>Post comment<textarea value={externalComment} onChange={(event) => setExternalComment(event.target.value)} rows={2} /></label><Button tone="quiet" type="button" onPress={() => { void externalAction('comment'); }} isDisabled={!externalComment.trim() || (!externalId && !externalUrl)}>Post</Button></div></section> : null}
       {activityVisited ? <section role="tabpanel" aria-label="Activity" hidden={detailTab !== 'activity'}><TaskActivity messages={task.messages} taskId={task.id} active={detailTab === 'activity'} /></section> : null}
       <section className={styles.artifacts} role="tabpanel" aria-label="Evidence" hidden={detailTab !== 'evidence'}>
@@ -816,7 +821,7 @@ export function BoardPanel({ group, sendCommand, onCommandUnavailable, host = br
   const editorTask = detailTask && (detailIsHydrated ? detailTask : hydratedDetail?.id === detailTask.id ? hydratedDetail : null);
   const requestedTaskId = workspaceUi.detailTaskId;
   const requestedTaskGroup = detailTask?.group || group;
-  const taskDetailRead = useBoardTaskDetail(requestedTaskId, requestedTaskGroup, connection.status === 'connected', connection.reconnectCount);
+  const taskDetailRead = useBoardTaskDetail(requestedTaskId, requestedTaskGroup, connection.status === 'connected', connection.reconnectCount, detailTask?.updatedAt ?? '');
   const removeTask = removeTaskId ? taskById.get(removeTaskId) ?? null : null;
   const selectedTasks = workspaceUi.selectedTaskIds.map((id) => taskById.get(id)).filter((task): task is BoardTask => Boolean(task));
   const dispatchTarget = dispatchTargetId ? taskById.get(dispatchTargetId) ?? null : null;
@@ -1110,7 +1115,7 @@ export function BoardPanel({ group, sendCommand, onCommandUnavailable, host = br
                           onOpenExternal={() => externalTicket.open(task)}
                           onDuplicate={() => duplicateTask(task)}
                           onArchive={() => archiveTask(task)}
-                          onVerify={() => sendOrNotify(sendCommand, { cmd: 'board_verify_task', id: task.id, actor_name: 'Operator', verification_state: 'passed', manual_smoke_done: true, human_validation_pending: '', deploy_needed: false }, onCommandUnavailable)}
+                          onVerify={() => { if (canMarkTaskVerified(task)) sendOrNotify(sendCommand, { cmd: 'board_verify_task', id: task.id, actor_name: 'Operator', verification_state: 'passed', manual_smoke_done: true, human_validation_pending: '', deploy_needed: false }, onCommandUnavailable); }}
                           onDetach={() => sendOrNotify(sendCommand, { cmd: 'board_update_task', id: task.id, parent_task_id: '', pipeline_depth: 0, pipeline_root_id: task.id, status: '', labels: task.labels.filter((label) => label !== 'torque:derived') }, onCommandUnavailable)}
                           onRemove={() => setRemoveTaskId(task.id)}
                           onFocus={() => dispatch(workspaceUiActions.setFocusedTask(task.id))}
