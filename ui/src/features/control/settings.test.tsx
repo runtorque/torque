@@ -145,3 +145,22 @@ it('explains the Classic-only scope of active layout compatibility settings', ()
   fireEvent.change(screen.getByLabelText('Collapsed default'), { target: { value: 'false' } });
   expect(change).toHaveBeenCalledWith({ filter_by_window: true, collapsed_default: false });
 });
+
+it('distinguishes literal empty map values from inherited schema fields', () => {
+  const change = vi.fn(); render(<StructuredSettings value={{ worker_provider: '', env_vars: { EMPTY: '' }, agent_env_vars: { EMPTY: '' }, board_sync_github: { github_lane_status_map: { 'In Review': '' } } }} onChange={change} />);
+  expect(screen.getByRole('textbox', { name: 'Worker provider' })).toHaveAttribute('placeholder', 'Inherit / default');
+  for (const name of ['Env vars: EMPTY', 'Agent env vars: EMPTY', 'Board sync github: GitHub lane status map: In Review']) {
+    const input = screen.getByRole('textbox', { name }); expect(input).toHaveValue(''); expect(input).toHaveAttribute('placeholder', '');
+  }
+  fireEvent.change(screen.getByRole('textbox', { name: 'Agent env vars: EMPTY' }), { target: { value: '  literal  ' } });
+  expect(change).toHaveBeenCalledWith({ worker_provider: '', env_vars: { EMPTY: '' }, agent_env_vars: { EMPTY: '  literal  ' }, board_sync_github: { github_lane_status_map: { 'In Review': '' } } });
+});
+
+it('explains desktop delivery separately from the independent Inbox event choices', () => {
+  render(<StructuredSettings value={{ notifications: false, notify_on_finish: true, notify_on_error: true, notify_on_attention: true }} onChange={() => undefined} />);
+  const desktop = screen.getByRole('combobox', { name: 'Desktop notifications' });
+  expect(desktop).toHaveValue('false'); expect(desktop).toHaveAccessibleDescription(/macOS.*Inbox history/);
+  for (const name of ['Notify on finish', 'Notify on error', 'Notify on attention']) {
+    const control = screen.getByRole('combobox', { name }); expect(control).toBeEnabled(); expect(control).toHaveAccessibleDescription(/Inbox/);
+  }
+});

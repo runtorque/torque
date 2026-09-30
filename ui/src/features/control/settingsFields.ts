@@ -713,20 +713,24 @@ export const settingFields: Record<string, SettingField> = {
     "kind": "bool"
   },
   "notifications": {
-    "label": "Notifications",
-    "kind": "bool"
+    "label": "Desktop notifications",
+    "kind": "bool",
+    "description": "Also deliver matching Inbox items as batched macOS notifications. Disabling desktop delivery keeps Inbox history and event recording."
   },
   "notify_on_finish": {
     "label": "Notify on finish",
-    "kind": "bool"
+    "kind": "bool",
+    "description": "Record finished agents in Inbox. Desktop delivery follows Desktop notifications."
   },
   "notify_on_error": {
     "label": "Notify on error",
-    "kind": "bool"
+    "kind": "bool",
+    "description": "Record agent errors as Inbox alerts. Desktop delivery follows Desktop notifications."
   },
   "notify_on_attention": {
     "label": "Notify on attention",
-    "kind": "bool"
+    "kind": "bool",
+    "description": "Record agents needing attention in Inbox. Desktop delivery follows Desktop notifications."
   },
   "board_default_action": {
     "label": "Board default action",

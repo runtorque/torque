@@ -3821,3 +3821,15 @@ History renders the persisted contract: role/template, input/output token counts
 - Trim variable names, but preserve everything after the first equals sign, including leading/trailing spaces, additional equals signs and explicit empty values. Ignore blank lines, comments and lines without a variable name and equals sign.
 - Worker role/group hydration must round-trip the displayed environment values without silently changing them on Create. The same value rules apply to explicit Engineer, Architect and terminal environment edits. This deliberately improves on Classic's trimming parser to preserve the exact maps already supported by Settings and the launch backend.
 - Group/agent environment-file fallback and variable precedence remain daemon-owned; clearing an agent default restores the group fallback for future launches.
+
+
+D-217 clarification (2026-09-30): arbitrary map values, including environment variables and GitHub mappings, are literal data. An empty map-value input must not display “Inherit / default”; preserve inheritance hints only on actual schema fields with that behavior. Clearing a literal value and removing its entry remain distinct operations.
+
+
+### D-218 — Distinguish Inbox recording from desktop notification delivery
+
+- Date: 2026-09-30
+- Scope: Group notification settings under P-088.
+- Label the `notifications` switch “Desktop notifications” and explain that it adds batched macOS delivery. Turning it off retains Inbox history and does not disable Inbox recording.
+- The finish, error and attention switches independently control which events produce Inbox entries. Keep these controls editable when desktop delivery is disabled; errors appear as Inbox alerts. Their descriptions explain that desktop delivery follows the separate switch.
+- Preserve normal sparse saves, refused drafts, reconnect focus and daemon-backed values. Do not change the existing backend delivery policy.

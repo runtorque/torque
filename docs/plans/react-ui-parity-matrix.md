@@ -795,12 +795,12 @@ Acceptance for **each field**: hydrate its server value, change it using the lis
 | `heartbeat_interval` | Engineer | Select: 0, 60, 120, 300, 600 | quiet seconds before idle heartbeat digest (0 = off) |
 | `default_directory` | Group | Text | Server value/default |
 | `shell` | Group | Select: inherit, zsh, bash, fish | Server value/default |
-| `env_vars` | Group | Nested named fields | Server value/default |
-| `env_file` | Group | Text | Server value/default |
+| `env_vars` | Group | Nested named fields | Literal base environment; actual agent/terminal precedence and complete removal verified by environment launch scenarios. |
+| `env_file` | Group | Text | Shell environment file fallback; saved/reopened path and actual agent/terminal file loading verified. |
 | `max_agents` | Group | Number | Server value/default; min=0, max=100 |
 | `collapsed_default` | Group | Enabled/Disabled; Classic-only scope guidance | Active Classic group disclosure default; distinct from React explicit agent-branch disclosure (D-209/D-213). |
-| `agent_env_vars` | Group | Nested named fields | Server value/default |
-| `agent_env_file` | Group | Text | Server value/default |
+| `agent_env_vars` | Group | Nested named fields | Overrides group variables; exact values reach Worker/Engineer/Architect processes. Removal restores group fallback; empty values remain literal. |
+| `agent_env_file` | Group | Text | Overrides group environment file; saved/reopened paths and clearing-to-group fallback verified in actual launches. |
 | `git_worktree` | Group | Enabled/Disabled | Server value/default |
 | `worktree_base_dir` | Group | Text | directory for worktrees (relative to repo) |
 | `worktree_base_branch` | Group | Text | branch to fork from (empty = current HEAD) |
@@ -810,10 +810,10 @@ Acceptance for **each field**: hydrate its server value, change it using the lis
 | `agent_session_resume` | Group | Enabled/Disabled | resume session on relaunch |
 | `agent_idle_timeout` | Group | Number | minutes before flagging agent as stuck (0=disable); min=0, max=60 |
 | `engineer_behavior_requires_user_approval` | Group | Enabled/Disabled | Server value/default |
-| `notifications` | Group | Enabled/Disabled | Server value/default |
-| `notify_on_finish` | Group | Enabled/Disabled | Server value/default |
-| `notify_on_error` | Group | Enabled/Disabled | Server value/default |
-| `notify_on_attention` | Group | Enabled/Disabled | Server value/default |
+| `notifications` | Group | Desktop notifications: Enabled/Disabled | Adds macOS delivery independently of durable Inbox recording. Both values persist/reopen; batching policy has backend coverage, native banners are not certified by browser tests. |
+| `notify_on_finish` | Group | Enabled/Disabled | Both values save/reopen; real current-turn completion creates an Inbox notification only when enabled. |
+| `notify_on_error` | Group | Enabled/Disabled | Both values save/reopen; ingested agent error creates an Inbox alert only when enabled. |
+| `notify_on_attention` | Group | Enabled/Disabled | Both values save/reopen; ingested waiting event creates an Inbox notification only when enabled. |
 | `board_default_action` | Group | Text | default action for new tasks |
 | `board_default_labels` | Group | One value per line | default labels for new tasks |
 | `board_default_lane` | Group | Text | default lane for new tasks (empty = first lane) |
@@ -2486,3 +2486,17 @@ P-371 final acceptance: **31 focused creation/recovery tests** passed (`/private
 The **73 focused backend launch/role/server-agent tests** passed (`/private/tmp/agent-environment-backend-20260930.log`); final browser-test lint/typecheck passed (`/private/tmp/agent-environment-final-static-20260930.log`). No backend/protocol implementation changed, so full backend tests were not repeated. Browser inventory is **168 tests / 104 files**, not a new complete-suite pass. The QA profile on port 19075 ended with zero PTYs; only its exact daemon/sidecars were stopped and its port released.
 
 Ledger: **371 mapped / 363 implemented or equivalent / four open / four intentionally retired**. This accepts the agent environment fields and creation repair; it does not close broad P-087/P-088/P-089/P-112 or the independent inventory/native/recovery gates. Remaining group worktree and notification settings need their own evidence. Screenshot review also identifies a follow-up: arbitrary map inputs display the generic “Inherit / default” placeholder for literal empty values; verify and correct that misleading guidance under the settings audit.
+
+
+### Literal map guidance and notification settings (2026-09-30, accepted)
+
+Two focused component regressions reproduced missing semantic guidance: literal empty map values incorrectly displayed “Inherit / default”, and the notification delivery switch omitted Classic's macOS/Inbox distinction. The map fix is a D-217 clarification; D-218 names desktop delivery and explains independent Inbox event recording. These refine existing P-088/field contracts without adding behavior rows. Focused settings/text checks pass 33 tests.
+
+`settings-notifications-live.spec.ts` adds actual save/reload/refusal/reconnect checks for all four notification fields, plus opt-in profile-harness events through real durable ingestion and Inbox policy. The desktop toggle is tested in both states before launching the generic fixture; event tests run with desktop delivery disabled, avoiding native banners while testing actual Inbox persistence. Backend policy tests separately cover desktop batching and all three event switches under both desktop states. Full UI and browser acceptance remain pending; no backend/protocol implementation changed.
+
+
+Final acceptance: **33 focused settings/text tests**, full `make ui-check` **112 files / 1,019 tests** plus lint/typecheck/build/verify, and **15 notification/Inbox backend tests** pass (`/private/tmp/notification-settings-green-20260930.log`, `/private/tmp/notification-settings-ui-check-final-20260930.log`, `/private/tmp/notification-settings-backend-final-20260930.log`). The initial UI gate caught Playwright-only `exact` options in component tests; those fixture options were removed. The notification unit fixture now captures publish requests because its state has no attached database; actual SQLite persistence is verified in the browser scenario.
+
+Final production browser **2/2 in 27.7 seconds** passed (`/private/tmp/notification-settings-browser-final-20260930.log`). The notification case verifies four fields through real save/reload, sparse retry, focused reconnect, event processing barriers, three persisted notices visible in Inbox and retained history after disabling all event switches. The initial synthetic completion was correctly rejected for an idle agent; the final fixture sends a real local user message and observes Running before completion. This retains the runtime stale-event guard. The adjacent environment scenario verifies the corrected literal-empty hint and all six process launch cases again. Settings/Inbox screenshots and JSON evidence were inspected.
+
+Final test lint/typecheck and documentation contracts pass. Inventory: **169 browser tests / 105 files** (`/private/tmp/notification-settings-browser-inventory-20260930.txt`); the complete browser suite was not rerun. Full backend tests were not repeated because backend/protocol implementation did not change. Native macOS banner display was not exercised; backend tests verify its batching gate. QA port 19076 ended with zero PTYs, only its exact daemon/sidecars were stopped, and the port was released. Counts remain **371 mapped / 363 implemented or equivalent / four open / four intentional retirements**. P-087/P-088/P-089/P-112 and independent acceptance gates remain open; group worktree settings are the next field-level runtime audit.
