@@ -199,3 +199,12 @@ it('rejects external acknowledgements for another task without losing the commen
   fireEvent.click(screen.getByRole('tab', { name: 'Integrations' })); const comment = screen.getByRole('textbox', { name: 'Post comment' }); fireEvent.change(comment, { target: { value: 'Retained review' } }); fireEvent.click(screen.getByRole('button', { name: 'Post' }));
   await screen.findByText(/acknowledgement did not match/); expect(comment).toHaveValue('Retained review'); expect(screen.getByRole('button', { name: 'Post' })).not.toBeDisabled();
 });
+
+it('opens the saved external ticket from task details instead of dropping the server result', async () => {
+  const opened = vi.spyOn(window, 'open').mockReturnValue(null);
+  const { send } = setup({ provider: 'github', external_id: 'qa/project#1', external_url: 'https://example.invalid/1' });
+  fireEvent.click(screen.getByRole('tab', { name: 'Integrations' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Open ticket' }));
+  await waitFor(() => expect(opened).toHaveBeenCalledWith('https://example.invalid/1', '_blank', 'noopener,noreferrer'));
+  expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ cmd: 'external_open_task' })); opened.mockRestore();
+});

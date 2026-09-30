@@ -1606,3 +1606,8 @@ P-401/P-402/D-235 restore live selected-pair inbox refresh, authoritative empty 
 ### External action and Clear context acceptance
 
 P-403–P-405/D-236–D-237 retain external comment/link drafts until matching acknowledgements and restore reviewed Clear context. The UI gate passes 119 files / 1,098 tests plus lint/typecheck/build verification; eight production-browser scenarios pass, including actual Inbox/sidebar persistence and local Worker context reset with unchanged PTYs. Hosted comments are intercepted before forwarding. Ledger: 405 mapped / 401 accepted implemented or equivalent / no recorded open repairs / four retirements. Phase 4 remains open for independent command/host reconciliation and the final current-build browser gate.
+
+
+### External ticket opening acceptance
+
+P-406/D-238 repairs inert external-ticket actions, routes saved links through the current host and provides task-correlated provider-ID lookup with a fresh browser gesture. Focused 20/20, UI120files1,105tests, and two production-browser scenarios pass. The independent command audit additionally confirmed missing Architect-stage behavior review (P-407), which remains open. Ledger: 407 mapped / 402 accepted / one repair pending / four retirements; Phase 4 remains open.

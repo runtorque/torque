@@ -3998,3 +3998,9 @@ Successful unlink advances only the editor's external-field baseline, so a later
 ## D-237 — Review the exact agent before clearing context
 
 Clear context uses a custom confirmation in browser and desktop, matching Classic's reviewed reset. Name the agent and explain that conversation/task context is reset and full instructions return on the next task. Capture the target ID and displayed name when opening; background renames or selection changes must not redirect the reviewed action. Initially focus Cancel. Cancel, Escape and close send nothing. A disconnected send keeps the review and visible unsent feedback; only an explicit retry may send again. Terminal-only contexts keep this action disabled.
+
+
+### D-238 — External tickets open through the current host
+
+- Decision: Board card and task-detail actions open a saved HTTP(S) URL through the current desktop/browser host during the user's click. A ticket with only a provider ID uses a bounded, task-correlated URL read and presents the resolved URL for a fresh Open click, preserving browser popup activation. Failed lookup or host opening retains a cancelable retry surface; unsolicited, stale or mismatched responses never open windows. Existing task drafts remain mounted.
+- Rationale: A sent command is not a navigation result. Browser and detached desktop Board surfaces must share the same usable action.

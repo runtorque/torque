@@ -524,7 +524,7 @@ function WorkspaceShellContent({ host, sendCommand }: WorkspaceShellProps) {
 
   if (detachedPanel === 'board' || detachedPanel === 'planning' || detachedPanel === 'control') {
     return <main className={styles.detachedShell}>
-      {detachedPanel === 'board' ? <BoardPanel group={activeGroup} sendCommand={sendCommand} onCommandUnavailable={commandUnavailable} /> : null}
+      {detachedPanel === 'board' ? <BoardPanel host={host} group={activeGroup} sendCommand={sendCommand} onCommandUnavailable={commandUnavailable} /> : null}
       {detachedPanel === 'planning' ? <Suspense fallback={<StateSurface title="Loading Planning" description="Preparing planning resources." />}><PlanningWorkspace key={activeGroup} group={activeGroup} sendCommand={sendCommand} onCommandUnavailable={commandUnavailable} /></Suspense> : null}
       {retainedGroup && retainedGroup !== activeGroup ? <div role="status">Settings for {retainedGroup} remain open. <Button onPress={() => requestNavigation(() => {})}>Switch to {activeGroup}</Button></div> : null}
       {detachedPanel === 'control' ? <Suspense fallback={<StateSurface title="Loading Control Center" description="Preparing operational resources." />}><ControlCenter host={host} key={controlGroup} group={controlGroup} sendCommand={sendCommand} onCommandUnavailable={commandUnavailable} /></Suspense> : null}
@@ -598,7 +598,7 @@ function WorkspaceShellContent({ host, sendCommand }: WorkspaceShellProps) {
 
         {navigation.error ? <div className={styles.connectionBanner} role="alert">Last workspace save is unconfirmed: {navigation.error} <Button tone="quiet" onPress={navigation.retry}>Retry workspace save</Button></div> : null}
         {connection.status === 'disconnected' ? <div className={styles.connectionBanner}>Connection lost. Torque will reconnect automatically.</div> : null}
-        {workspaceUi.activePanel === 'board' && !activeDetachedLabel ? <BoardPanel group={activeGroup} sendCommand={sendCommand} onCommandUnavailable={commandUnavailable} /> : null}
+        {workspaceUi.activePanel === 'board' && !activeDetachedLabel ? <BoardPanel host={host} group={activeGroup} sendCommand={sendCommand} onCommandUnavailable={commandUnavailable} /> : null}
         {activeDetachedLabel ? <StateSurface title={`${workspaceUi.activePanel[0]?.toUpperCase()}${workspaceUi.activePanel.slice(1)} workspace detached`} description="This workspace is open in its native window." action={<><Button onPress={() => { void host.focusWindow(activeDetachedLabel).catch(commandUnavailable); }}>Focus detached workspace</Button><Button onPress={() => { void reattachActive(); }}>Reattach workspace</Button></>} /> : null}
         {workspaceUi.activePanel === 'agents' ? <div className={styles.agentWorkspaceHost} hidden={Boolean(activeDetachedLabel)}><AgentWorkspace active={!activeDetachedLabel} group={activeGroup} host={host} sendCommand={sendCommand} onCommandUnavailable={commandUnavailable} /></div> : null}
         {workspaceUi.activePanel === 'planning' && !activeDetachedLabel ? <Suspense fallback={<StateSurface title="Loading Planning" description="Preparing planning resources." />}><PlanningWorkspace key={activeGroup} group={activeGroup} sendCommand={sendCommand} onCommandUnavailable={commandUnavailable} /></Suspense> : null}
