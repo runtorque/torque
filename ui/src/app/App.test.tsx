@@ -10,10 +10,12 @@ import { WorkspaceShell } from './App';
 import { sanitizeClientError } from './clientDiagnostics';
 import { connectionActions, createAppStore, projectionActions, workspaceUiActions } from './store';
 
-function renderShell(host = browserHost, frame: StateFrame = compactStateFixture) {
+function renderShell(host = browserHost, frame: StateFrame = compactStateFixture, deploymentRead = false) {
   const featureFetch = globalThis.fetch; const detailReads: TorqueCommand[] = [];
   vi.stubGlobal('fetch', (input: RequestInfo | URL, options?: RequestInit) => {
     const command = JSON.parse(typeof options?.body === 'string' ? options.body : '{}') as TorqueCommand;
+    // Isolate the shell poll from feature-specific request assertions; deployment has its own integration case.
+    if (command.cmd === 'get_deploy_state' && !deploymentRead) return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, data: { type: 'deploy_state', group: command.group, pending_deploy: { count: 0, torque_task_ids: [] } } }) });
     // Task hydration frames are supplied explicitly by the shell integration tests.
     if (command.cmd === 'task_detail') { detailReads.push(command); return new Promise<Response>(() => {}); }
     if (command.cmd === 'ui_set_react_workspace_state') return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, data: { type: 'react_workspace_state', state: command.state, writer_id: command.writer_id, revision: command.revision } }) });
@@ -1879,4 +1881,16 @@ it('reviews Clear context and retains the exact target when disconnected submiss
   act(() => { appStore.dispatch(projectionActions.deltaReceived({ type: 'delta', seq: 11, ops: [{ op: 'agent_upsert', id: 'agent-1', name: 'Renamed after review' }] })); });
   expect(screen.getByRole('dialog', { name: 'Clear agent context?' })).toHaveTextContent('Foundation Worker'); fireEvent.click(screen.getByRole('button', { name: 'Clear context' }));
   expect(sendCommand.mock.calls.filter(([cmd]) => cmd.cmd === 'clear_agent_context').map(([cmd]) => cmd)).toEqual([{ cmd: 'clear_agent_context', id: 'agent-1' }, { cmd: 'clear_agent_context', id: 'agent-1' }]);
+});
+
+
+it('renders the actual scoped pending-deploy contract and opens its Board', async () => {
+  vi.stubGlobal('fetch', (_url: string, options?: RequestInit) => {
+    const command = JSON.parse(typeof options?.body === 'string' ? options.body : '{}') as TorqueCommand;
+    return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, data: command.cmd === 'get_deploy_state' ? { type: 'deploy_state', group: 'Foundation', pending_deploy: { count: 2, torque_task_ids: ['TORQUE:9', 'TORQUE:10'] }, daemon_uptime_seconds: 300 } : { type: 'ok' } }) });
+  });
+  renderShell(browserHost, compactStateFixture, true);
+  fireEvent.click(screen.getByRole('button', { name: /Agents/ }));
+  const deploy = await screen.findByRole('button', { name: 'Deploy +2' }); expect(deploy).toHaveAttribute('title', expect.stringContaining('TORQUE:9'));
+  fireEvent.click(deploy); expect(await screen.findByRole('heading', { name: 'Board' })).toBeVisible();
 });

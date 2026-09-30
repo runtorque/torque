@@ -1,3 +1,4 @@
+import { DeployStatus } from './DeployStatus';
 import { CommandConfirmation, type ConfirmedCommand } from './CommandConfirmation';
 import { SettingsNavigationProvider } from './SettingsNavigationGuard';
 import { useSettingsNavigation } from './settingsNavigation';
@@ -19,7 +20,6 @@ import { useAppDispatch, useAppSelector } from './hooks';
 import {
   createAppStore,
   selectAgentsState,
-  selectAuxiliaryResponseState,
   selectConnection,
   selectGroupsState,
   selectNoticesState,
@@ -167,7 +167,6 @@ function WorkspaceShellContent({ host, sendCommand }: WorkspaceShellProps) {
   const agentsState = useAppSelector(selectAgentsState);
   const tasksState = useAppSelector(selectTasksState);
   const operations = useAppSelector(selectOperationsState);
-  const auxiliaryResponses = useAppSelector(selectAuxiliaryResponseState);
   const { records: groups } = useAppSelector(selectGroupsState);
   const notices = useAppSelector(selectNoticesState);
   const workspace = useAppSelector(selectWorkspaceState);
@@ -234,7 +233,6 @@ function WorkspaceShellContent({ host, sendCommand }: WorkspaceShellProps) {
   const groupTasks = Object.values(tasksState.records).map(asRecord).filter((task) => task.group === activeGroup && task.lane !== 'Archived');
   const runningAgents = groupAgents.filter((agent) => ['running', 'working', 'busy'].includes(textValue(agent.status))).length;
   const attentionCount = groupAgents.filter((agent) => agent.needs_attention === true || textValue(agent.health_state) === 'blocked').length + unread;
-  const deployState = asRecord(auxiliaryResponses['deploy_state:_'] ?? auxiliaryResponses['deploy_state:latest']);
   const healthState = textValue(operations.health.status, textValue(operations.health.overall_status, 'unknown'));
 
   const pushToast = useCallback((message: string, level: ToastMessage['level'] = 'info') => {
@@ -351,10 +349,6 @@ function WorkspaceShellContent({ host, sendCommand }: WorkspaceShellProps) {
     setSidebarWidth(next);
     sendCommand({ cmd: 'ui_set_workspace_sidebar_width', width: next });
   };
-
-  useEffect(() => {
-    if (connection.status === 'connected') sendCommand({ cmd: 'get_deploy_state' });
-  }, [connection.reconnectCount, connection.status, sendCommand]);
 
   useEffect(() => {
     const target = window as Window & {
@@ -608,7 +602,7 @@ function WorkspaceShellContent({ host, sendCommand }: WorkspaceShellProps) {
         <footer className={styles.statusBar} aria-label="Workspace status">
           {statusVisibilityEnabled(statusVisibility.daemon_status) ? <span data-state={connection.status}>● Daemon {connection.status}</span> : null}
           <RelayStatusIndicator connection={operations.relayConnection} visible={statusVisibility.daemon_status} />
-          {statusVisibility.deploy ? <span>Deploy {textValue(deployState.status, textValue(deployState.state, '—'))}{Number(deployState.commits_behind ?? deployState.behind ?? 0) ? ` +${Number(deployState.commits_behind ?? deployState.behind)}` : ''}</span> : null}
+          <DeployStatus group={activeGroup} enabled={statusVisibilityEnabled(statusVisibility.deploy)} ready={connection.status === 'connected' && connection.expectedSeq !== null && !connection.awaitingResync} reconnect={connection.reconnectCount} onOpen={() => navigatePanel('board')} />
           {statusVisibility.health ? <span>Health {healthState}</span> : null}
           {statusVisibility.workload ? <span>Agents {runningAgents} run · {groupAgents.length} total</span> : null}
           {statusVisibility.tasks ? <span>Tasks {groupTasks.filter((task) => task.lane !== 'Done').length} active</span> : null}

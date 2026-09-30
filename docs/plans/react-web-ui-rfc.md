@@ -1621,3 +1621,8 @@ P-407/D-239 restores explicit Architect approval/rejection with correct identity
 ### Board verification acceptance
 
 P-408/P-409/D-240 restore Classic quick-verification eligibility and reconcile live verification state/evidence without losing authored drafts or replaying received fields. The UI gate passes 122 files / 1,118 tests; all nine scoped browser scenarios have passing evidence after correcting two fixture expectations. Ledger: 409 mapped / 405 accepted / no recorded open repairs / four retirements. The command audit has identified a deployment-status projection mismatch for the next repair; current native handoff and the final complete browser gate remain pending. Phase 4 remains open.
+
+
+### Scoped deployment-status acceptance
+
+P-410/D-241 restores the actual pending-deploy count, task details, scoped polling, error/retry behavior and Board shortcut. The UI gate passes 123 files / 1,122 tests; deployment browser acceptance passes with actual reconnect and read deadlines alongside three adjacent passing scenarios. Six additional footer differences have been reproduced and remain next repair work; Phase 4 stays open. No deployment or daemon restart was performed.

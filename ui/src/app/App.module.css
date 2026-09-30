@@ -112,3 +112,5 @@
 
 .agentWorkspaceHost { display: flex; flex: 1; min-height: 0; overflow: hidden; }
 .agentWorkspaceHost[hidden] { display: none; }
+
+.statusBar button[data-tone='danger'] { color: var(--danger); }

@@ -4016,3 +4016,8 @@ Clear context uses a custom confirmation in browser and desktop, matching Classi
 
 - Decision: Mark verified is offered only for Done tasks (including tasks archived from Done) whose saved verification state is pending or attempted, matching Classic. Manual verification fields remain editable independently.
 - Live editing: A changed timestamp for the selected task triggers an owned detail refresh because compact deltas omit evidence summaries; unrelated tasks and hidden editors trigger no reads, and superseded responses are ignored. The mounted task editor reconciles saved verification updates into untouched fields while preserving authored changes per summary key, note, mode and state. A received verification result is not a new edit: later unrelated saves cannot replay it over newer saved evidence. Acknowledged task saves advance the editor baseline even if subsequent attachment cleanup needs retry.
+
+
+### D-241 — Scoped deployment status
+
+The deployment status uses the daemon's `pending_deploy` count and task IDs. A pending count is a keyboard-accessible Board shortcut; a failed check is a visible retry action with its reason, while zero pending tasks hides the chip. Read the selected group's state on connect, group change and return to a visible document, and every 90 seconds while visible. Hidden/disabled/disconnected surfaces stop polling. Each read owns a 15-second deadline and cancellation scope; late or wrong-group responses cannot replace current evidence. Opening the shortcut refreshes evidence without deploying or restarting anything.
