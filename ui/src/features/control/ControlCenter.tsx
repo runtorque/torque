@@ -348,8 +348,10 @@ export function ControlCenter({ group, sendCommand, onCommandUnavailable, host =
   }, [group, tab, connection.status, connection.reconnectCount, send]);
 
   const agentItems = useMemo(() => records(agents.records).filter((item) => !group || item.group === group), [agents.records, group]);
-  const agentCount = agentItems.filter((item) => item.cell_type !== 'terminal').length;
-  const terminalCount = agentItems.filter((item) => item.cell_type === 'terminal').length;
+  // Deleted records remain available for Restore and historical Context authors.
+  const retainedItems = agentItems.filter((item) => !Number(item.deleted_at ?? 0));
+  const agentCount = retainedItems.filter((item) => item.cell_type !== 'terminal').length;
+  const terminalCount = retainedItems.filter((item) => item.cell_type === 'terminal').length;
   const eventItems = useMemo(() => [...operations.events].reverse().map(record), [operations.events]);
   return <section className={styles.root} aria-label="Control Center">
     <header className={styles.header}><div><p>Workspace / {group || 'No group'}</p><h1>Control Center</h1></div><span>{agentCount} {agentCount === 1 ? 'agent' : 'agents'}{terminalCount ? ` · ${terminalCount} ${terminalCount === 1 ? 'terminal' : 'terminals'}` : ''} · {eventItems.length} events</span>{['mission', 'activity', 'actions', 'catalog', 'help'].includes(tab) ? <Button tone="quiet" onPress={refresh}>Refresh section</Button> : null}</header>

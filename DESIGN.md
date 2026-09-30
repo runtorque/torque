@@ -3796,3 +3796,11 @@ History renders the persisted contract: role/template, input/output token counts
 - Reject with note opens a custom dialog naming the requested Engineer and requesting Architect. The optional multiline note survives unrelated updates and reconnects. Submission trims only its outer whitespace and targets the captured hire ID. Pending submission prevents repetition and dismissal; an error retains the submitted note for an explicit identical retry. A 30-second observation deadline covers request and body decoding. An expired, cancelled or unmounted response cannot settle a later attempt; reconnect never replays the rejection.
 - Keep the review dialog mounted independently of the pending-hire card because an authoritative resolution delta can remove that card before the HTTP acknowledgement arrives. Close only on the daemon's accepted rejection contract, then refresh the displayed collection. Cancel after an unknown outcome ends the review; it cannot undo a server-side resolution.
 - Planning journals render the actual `entry`, `type`, `timestamp` and author identity, rather than generic title/summary fields. Use a first-line summary with author/type/time and an expandable complete multiline body. Stable entry keys preserve disclosure through refresh and reconnect. Journal cards are read-only disclosures, not buttons with no action.
+
+
+### D-215 — Count workspace members independently of recoverable deletion records
+
+- Date: 2026-09-30
+- Scope: Control Center header and Mission Control agent/terminal totals; P-078/P-369.
+- Count non-deleted records in the selected group, including stopped agents and terminals that remain in the workspace. Recoverable records with `deleted_at` are excluded from current totals; restoration includes them again. Apply the same distinction after live deltas and snapshots.
+- Keep recoverable records in the projection and historical Context author lookup. A summary count must not purge history, remove Restore targets, or equate stopped processes with deleted workspace members.
