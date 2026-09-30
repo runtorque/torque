@@ -164,3 +164,21 @@ it('explains desktop delivery separately from the independent Inbox event choice
     const control = screen.getByRole('combobox', { name }); expect(control).toBeEnabled(); expect(control).toHaveAccessibleDescription(/Inbox/);
   }
 });
+
+it.each([
+  ['profile', 'Profile', /Stored launch profile metadata.*Embedded terminals do not apply/],
+  ['agent_terminal_profile', 'Agent terminal profile', /Stored launch profile metadata.*Embedded terminals do not apply/],
+  ['terminal_profile', 'Terminal profile', /Stored launch profile metadata.*Embedded terminals do not apply/],
+  ['engineer_profile', 'Engineer profile', /Stored launch profile metadata.*Embedded terminals do not apply/],
+  ['architect_profile', 'Architect profile', /Stored launch profile metadata.*Embedded terminals do not apply/],
+  ['tab_color', 'Tab color', /Stored launch color metadata.*do not apply tab colors/],
+  ['agent_tab_color', 'Agent tab color', /Stored launch color metadata.*do not apply tab colors/],
+  ['terminal_tab_color', 'Terminal tab color', /Stored launch color metadata.*do not apply tab colors/],
+  ['engineer_tab_color', 'Engineer tab color', /Stored launch color metadata.*do not apply tab colors/],
+  ['architect_tab_color', 'Architect tab color', /Stored launch color metadata.*do not apply tab colors/],
+  ['default_terminal_backend', 'Default terminal backend', /Compatibility value.*embedded PTY backend regardless of this setting/],
+] as const)('explains the runtime limits of stored launch field %s without discarding its value', (key, label, description) => {
+  const change = vi.fn(); render(<StructuredSettings value={{ [key]: 'retained value' }} onChange={change} />);
+  const input = screen.getByRole('textbox', { name: label }); expect(input).toHaveValue('retained value'); expect(input).toHaveAccessibleDescription(description);
+  fireEvent.change(input, { target: { value: 'updated metadata' } }); expect(change).toHaveBeenCalledWith({ [key]: 'updated metadata' });
+});

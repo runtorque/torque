@@ -3852,3 +3852,12 @@ D-217 clarification (2026-09-30): arbitrary map values, including environment va
 - A saved nonempty terminal prefix suggests the lowest unused positive suffix, matching Classic's workspace-wide name collision check. The setting belongs to the creation group; collisions include other groups. With no prefix, keep the explicit empty name field. Other agent kinds do not inherit terminal names.
 - Suggestions may hydrate with incoming group defaults until the operator edits the name. Manual text and explicit clearing remain authoritative through deltas, reconnects and kind changes. A cleared required name keeps creation disabled.
 - Freeze the exact submitted identity before creation so a newly visible record or changed prefix cannot alter the displayed name during pending delivery or retry. Existing creation receipt and duplicate-prevention rules remain authoritative.
+
+
+### D-221 — Distinguish retained launch metadata from embedded terminal effects
+
+- Date: 2026-09-30
+- Scope: P-088/P-089 terminal backend, profile and tab-color defaults.
+- Keep the stored profile/color fields editable and preserve their existing inheritance into launch records. Describe them as launch metadata: the current embedded terminal adapter does not apply terminal-emulator profiles, and embedded terminals/React do not apply tab colors. Do not promise an iTerm appearance change from Engineer defaults.
+- Label the stored default backend as a compatibility value: current operator launches explicitly use the embedded PTY backend. Editing this stored field does not switch terminal runtimes.
+- This is clarification of existing runtime capabilities, not retirement of a supported visual workflow. Classic's manual terminal defaults pane is already absent, while action/role metadata authoring remains available. `TerminalCapabilities` and `LocalPtyAdapter.capabilities` define the current support; launch resolution/persistence alone must not be counted as a visual-effect test.

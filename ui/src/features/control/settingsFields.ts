@@ -903,22 +903,27 @@ export const settingFields: Record<string, SettingField> = {
     "kind": "bool"
   },
   "default_terminal_backend": {
+    "description": "Compatibility value. New sessions use the embedded PTY backend regardless of this setting.",
     "label": "Default terminal backend",
     "kind": "str"
   },
   "profile": {
+    "description": "Stored launch profile metadata. Embedded terminals do not apply terminal-emulator profiles.",
     "label": "Profile",
     "kind": "str"
   },
   "tab_color": {
+    "description": "Stored launch color metadata. Embedded terminals and the React workspace do not apply tab colors.",
     "label": "Tab color",
     "kind": "str"
   },
   "agent_terminal_profile": {
+    "description": "Stored launch profile metadata. Embedded terminals do not apply terminal-emulator profiles.",
     "label": "Agent terminal profile",
     "kind": "str"
   },
   "agent_tab_color": {
+    "description": "Stored launch color metadata. Embedded terminals and the React workspace do not apply tab colors.",
     "label": "Agent tab color",
     "kind": "str"
   },
@@ -985,6 +990,7 @@ export const settingFields: Record<string, SettingField> = {
     "kind": "str"
   },
   "terminal_profile": {
+    "description": "Stored launch profile metadata. Embedded terminals do not apply terminal-emulator profiles.",
     "label": "Terminal profile",
     "kind": "str"
   },
@@ -993,6 +999,7 @@ export const settingFields: Record<string, SettingField> = {
     "kind": "str"
   },
   "terminal_tab_color": {
+    "description": "Stored launch color metadata. Embedded terminals and the React workspace do not apply tab colors.",
     "label": "Terminal tab color",
     "kind": "str"
   },
@@ -1029,10 +1036,12 @@ export const settingFields: Record<string, SettingField> = {
     "kind": "list[str]"
   },
   "architect_profile": {
+    "description": "Stored launch profile metadata. Embedded terminals do not apply terminal-emulator profiles.",
     "label": "Architect profile",
     "kind": "str"
   },
   "architect_tab_color": {
+    "description": "Stored launch color metadata. Embedded terminals and the React workspace do not apply tab colors.",
     "label": "Architect tab color",
     "kind": "str"
   },
@@ -1094,13 +1103,13 @@ export const settingFields: Record<string, SettingField> = {
     "kind": "str"
   },
   "engineer_profile": {
+    "description": "Stored launch profile metadata. Embedded terminals do not apply terminal-emulator profiles.",
     "label": "Engineer profile",
-    "description": "iTerm profile override for the designated engineer",
     "kind": "str"
   },
   "engineer_tab_color": {
+    "description": "Stored launch color metadata. Embedded terminals and the React workspace do not apply tab colors.",
     "label": "Engineer tab color",
-    "description": "tab color override for the designated engineer",
     "kind": "str"
   },
   "enabled_events": {

@@ -834,12 +834,12 @@ Acceptance for **each field**: hydrate its server value, change it using the lis
 | `architect_max_interval` | Group, Architect | Select: 120, 300, 600, 1200, 1800 | Server value/default |
 | `architect_heartbeat_interval` | Group, Architect | Select: 0, 300, 600, 1200, 1800 | Server value/default |
 | `architect_suppress_empty_digests` | Group, Architect | Enabled/Disabled | Server value/default |
-| `default_terminal_backend` | Group | Text | Server value/default |
-| `profile` | Group | Text | Server value/default |
-| `tab_color` | Group | Text | Server value/default |
+| `default_terminal_backend` | Group | Text · compatibility value | Stored compatibility value; current operator launches explicitly use the embedded PTY backend (D-221). |
+| `profile` | Group | Text · retained launch metadata | Saved profile metadata inherits into launch records; embedded terminals do not apply terminal-emulator profiles (D-221). |
+| `tab_color` | Group | Text · retained launch metadata | Saved color metadata inherits into launch records; current embedded terminals and React do not apply tab colors (D-221). |
 | `auto_terminals` | Group | Compatibility-only; no editable control | Preserved in stored profiles; omitted from search, save and reset. Explicit companion terminals remain supported. |
-| `agent_terminal_profile` | Group | Text | Server value/default |
-| `agent_tab_color` | Group | Text | Server value/default |
+| `agent_terminal_profile` | Group | Text · retained launch metadata | Saved profile metadata inherits into launch records; embedded terminals do not apply terminal-emulator profiles (D-221). |
+| `agent_tab_color` | Group | Text · retained launch metadata | Saved color metadata inherits into launch records; current embedded terminals and React do not apply tab colors (D-221). |
 | `worktree_auto_checkpoint` | Group | Enabled/Disabled | Both values save/reopen and control actual end-of-turn commits independently of progress checkpoints; four-combination real-Git acceptance below. |
 | `checkpoint_on_progress` | Group | Enabled/Disabled | Both values save/reopen and gate actual progress commits; immediate repeat is throttled, independently of end-of-turn checkpointing. |
 | `worktree_merge_instructions` | Group | Compatibility-only · excluded from edit/reset | No current merge-prompt consumer; Classic save also omits it. Preserve stored text; D-213. |
@@ -852,10 +852,10 @@ Acceptance for **each field**: hydrate its server value, change it using the lis
 | `terminal_boot_command` | Group | Text | Real-PTY Settings acceptance verifies inherited boot command without a creation override; see terminal runtime checkpoint below. |
 | `terminal_command_args` | Group | Text | Quoted arguments containing spaces reach the real process; explicit creation arguments override the saved default. |
 | `terminal_init_script` | Group | Text | Existing shell-script path, sourced before the command; paths containing spaces and exported initialization values verified in a real PTY. |
-| `terminal_directory` | Group | Text | Saved terminal directory overrides the group directory; explicit creation directory wins; clearing resumes group inheritance. |
-| `terminal_profile` | Group | Text | Server value/default |
+| `terminal_directory` | Group | Text | Real-PTY Settings acceptance verifies explicit creation directory > parent worktree > saved terminal directory > group directory. Clearing the terminal override restores group inheritance when the parent has no worktree. |
+| `terminal_profile` | Group | Text · retained launch metadata | Saved profile metadata inherits into launch records; embedded terminals do not apply terminal-emulator profiles (D-221). |
 | `terminal_shell` | Group | Text | Saved shell is inherited by terminal creation; clearing resumes the group shell. Bash initialization behavior verified in a real PTY. |
-| `terminal_tab_color` | Group | Text | Server value/default |
+| `terminal_tab_color` | Group | Text · retained launch metadata | Saved color metadata inherits into launch records; current embedded terminals and React do not apply tab colors (D-221). |
 | `terminal_env_vars` | Group | Nested named fields | Typed map merges over group environment; explicit creation values take precedence. Saved/reopened controls and real process values verified. |
 | `terminal_env_file` | Group | Text | Saved shell environment-file path is sourced before launch; clearing resumes the group environment file. |
 | `terminal_always_custom_dialog` | Group | Compatibility-only · excluded from edit/reset | No current terminal-dialog consumer. Preserve stored value; D-213. |
@@ -863,8 +863,8 @@ Acceptance for **each field**: hydrate its server value, change it using the lis
 | `board_sync_github` | Group | Nested named fields | GitHub adapter settings |
 | `engineer_agent_id` | Group | Runtime record · read-only in this inventory | Managed by group/agent identity, attention or hint workflows; excluded from reset/save. |
 | `default_engineer_specializations` | Group | One value per line | ordered, applied at engineer creation |
-| `architect_profile` | Group, Architect | Text | Server value/default |
-| `architect_tab_color` | Group, Architect | Text | Server value/default |
+| `architect_profile` | Group, Architect | Text · retained launch metadata | Saved profile metadata inherits into launch records; embedded terminals do not apply terminal-emulator profiles (D-221). |
+| `architect_tab_color` | Group, Architect | Text · retained launch metadata | Saved color metadata inherits into launch records; current embedded terminals and React do not apply tab colors (D-221). |
 | `architect_enabled_events` | Group, Architect | One value per line | Server value/default |
 | `architect_review_gate_thresholds` | Group, Architect | Two non-negative safe integers and a boolean; fixed named fields | Server value/default |
 | `group` | Architect, Engineer | Runtime record · read-only in this inventory | Managed by group/agent identity, attention or hint workflows; excluded from reset/save. |
@@ -877,8 +877,8 @@ Acceptance for **each field**: hydrate its server value, change it using the lis
 | `pending_note_kind` | Engineer | Runtime record · read-only in this inventory | Managed by group/agent identity, attention or hint workflows; excluded from reset/save. |
 | `pending_note_set_at` | Engineer | Runtime record · read-only in this inventory | Managed by group/agent identity, attention or hint workflows; excluded from reset/save. |
 | `pending_note_actor_id` | Engineer | Runtime record · read-only in this inventory | Managed by group/agent identity, attention or hint workflows; excluded from reset/save. |
-| `engineer_profile` | Engineer | Text | iTerm profile override for the designated engineer |
-| `engineer_tab_color` | Engineer | Text | tab color override for the designated engineer |
+| `engineer_profile` | Engineer | Text · retained launch metadata | Saved profile metadata inherits into launch records; embedded terminals do not apply terminal-emulator profiles (D-221). |
+| `engineer_tab_color` | Engineer | Text · retained launch metadata | Saved color metadata inherits into launch records; current embedded terminals and React do not apply tab colors (D-221). |
 | `enabled_events` | Engineer | One value per line | optional events (mandatory always on) |
 | `xterm_scrollback` | Global | Number | embedded xterm.js history lines |
 | `default_lanes` | Global | One value per line | Server value/default |
@@ -2556,3 +2556,21 @@ Final production browser **2/2 in 35.5 seconds** passed (`/private/tmp/terminal-
 No backend/protocol implementation changed after the preceding full **3,276-test / 82-skip** pass, so that suite was not repeated. Documentation contracts and diff checks passed. The complete browser and native suites were not rerun. QA ended with zero PTYs; exact daemon/ingest/supervisor PIDs 24563/24577/24578 were stopped and their absence and port 19079 release verified.
 
 Ledger: **373 mapped / 365 implemented or equivalent / four broad open / four intentional retirements**. P-087/P-088/P-089/P-112 and independent acceptance gates remain open. Next field-level work includes companion-terminal directory precedence and a source-backed disposition for the remaining stored profile/color/backend settings; their presence or persistence alone does not prove a runtime effect.
+
+
+### Companion terminal and retained launch metadata audit (2026-09-30)
+
+`settings-companion-terminal-live.spec.ts` verifies actual process cwd for four cases: parent worktree over saved terminal defaults, explicit directory over the parent worktree, saved terminal directory when the parent has no worktree, and group directory after clearing the terminal override. All defaults are saved/reopened in React; four actual Python receivers record their cwd. The first fixture used an exact text-label locator that did not resolve the parent select; the accessible combobox locator from the captured snapshot corrected the fixture. The final scenario passed in 6.0 seconds (`/private/tmp/companion-terminal-browser-controls-20260930.log`). No production directory behavior changed.
+
+The remaining profile/color/backend fields are stored launch metadata rather than current appearance/runtime selectors. Source audit covers all production consumers: `LocalPtyAdapter.capabilities` leaves profile/tab-color support false; profile/color values flow through launch resolution and persistence; current operator commands explicitly select PTY. D-221 replaces missing or misleading guidance while retaining the controls and their values. Eleven component regressions reproduced the missing guidance; 44 focused settings/text tests now pass (`/private/tmp/launch-metadata-guidance-green-20260930.log`). Full UI, live metadata inheritance and final acceptance are pending. No new mapped behavior; broad audits remain open.
+
+
+### Companion terminal and launch metadata accepted (2026-09-30)
+
+Final `make ui-check` passed lint/typecheck, **112 files / 1,038 tests**, production build and build verification (`/private/tmp/launch-metadata-ui-check-20260930.log`). All **62 focused backend launch/backend tests** passed (`/private/tmp/launch-metadata-backend-20260930.log`). The final production-browser batch passed **2/2 in 20.1 seconds** (`/private/tmp/launch-metadata-browser-final-20260930.log`): four actual companion-terminal cwd cases and nine actual Worker/Engineer/Architect/Terminal launches for metadata inheritance. The metadata case saves/reopens eleven controls, checks their runtime-limit descriptions, verifies specific overrides and clearing to group metadata, then verifies cleared group metadata uses Default/empty. All nine launches use PTY even with a different stored compatibility backend value. This proves metadata propagation and the current backend choice; it does not claim unsupported profile/color visual effects. Screenshot and JSON evidence were inspected.
+
+The directory fixture's initial exact-label mismatch consumed its timeout and prevented its cleanup from using the disposed request context. Only those two named fixture agents and their temporary repository were cleaned manually; the corrected role locator and shorter per-action timeout allow normal cleanup. Neither the runtime nor the four behavioral assertions was weakened.
+
+No backend/protocol implementation changed, so the preceding full 3,276-test/82-skip result was not repeated. Complete browser/native suites were not rerun. The canonical field count remains 142; eleven controls now explicitly describe their retained metadata/compatibility role. Ledger remains **373 mapped / 365 implemented or equivalent / four broad open / four intentional retirements**. The next consolidation must distinguish already accepted fields from remaining explicit provider/model/reasoning/fast-mode override round trips, session-resume/idle behavior and broad lazy/reconnect coverage; those are not certified by this checkpoint.
+
+Final QA cleanup: runtime evidence confirmed zero PTYs; only exact disposable daemon/ingest/supervisor PIDs 99941/99955/99956 were stopped, their absence verified and port 19080 released (`/private/tmp/launch-metadata-runtime-final-20260930.json`). Documentation contracts and diff checks passed. Browser inventory is 175 tests / 111 files, not a complete-suite run.
