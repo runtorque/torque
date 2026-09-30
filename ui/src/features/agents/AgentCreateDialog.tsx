@@ -61,9 +61,12 @@ function parseEnvironment(value: string): Record<string, string> {
   value.split(/\r?\n/).forEach((line) => {
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith('#')) return;
-    const separator = trimmed.indexOf('=');
-    if (separator <= 0) return;
-    result[trimmed.slice(0, separator).trim()] = trimmed.slice(separator + 1);
+    const separator = line.indexOf('=');
+    if (separator < 0) return;
+    const key = line.slice(0, separator).trim();
+    if (!key) return;
+    // Values are literal data, including empty values and trailing whitespace.
+    result[key] = line.slice(separator + 1);
   });
   return result;
 }

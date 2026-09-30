@@ -3812,3 +3812,12 @@ History renders the persisted contract: role/template, input/output token counts
 - Scope: AI settings, P-087/P-370.
 - The embedding-runtime control offers Sentence Transformers, the daemon's currently supported runtime. Remove the unsupported FastEmbed choice, which caused valid-looking drafts to fail on save. Add another choice only when the daemon accepts and implements it.
 - Keep provider/model, corpus and boot-summary settings independently editable with AI disabled. Preserve authored drafts on refusal or reconnect; display saved normalized values after reload. Enabling AI remains a persisted master switch, and unavailable local dependencies/models remain a visible recoverable runtime error.
+
+
+### D-217 — Preserve literal launch environment values
+
+- Date: 2026-09-30
+- Scope: Agent/terminal creation environment editors, P-371; extends D-185's literal environment-value contract.
+- Trim variable names, but preserve everything after the first equals sign, including leading/trailing spaces, additional equals signs and explicit empty values. Ignore blank lines, comments and lines without a variable name and equals sign.
+- Worker role/group hydration must round-trip the displayed environment values without silently changing them on Create. The same value rules apply to explicit Engineer, Architect and terminal environment edits. This deliberately improves on Classic's trimming parser to preserve the exact maps already supported by Settings and the launch backend.
+- Group/agent environment-file fallback and variable precedence remain daemon-owned; clearing an agent default restores the group fallback for future launches.

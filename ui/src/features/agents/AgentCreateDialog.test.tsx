@@ -119,3 +119,27 @@ it('stages a notification preset for creation and preserves an explicitly empty 
   fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Quiet engineer' } }); fireEvent.click(screen.getByRole('button', { name: 'Create engineer' }));
   await waitFor(() => expect(close).toHaveBeenCalledOnce()); expect(calls.find((call) => call.cmd === 'add_engineer')).toMatchObject({ agent_digest_settings: { digest_verbosity: 'compact', push_interval: 120, max_interval: 600, heartbeat_interval: 0, enabled_events: [] } });
 });
+
+it.each(['worker', 'architect', 'engineer', 'terminal'] as const)('preserves exact environment values when creating a %s', async (kind) => {
+  const calls: TorqueCommand[] = [];
+  vi.stubGlobal('fetch', mockFetch((_url, options) => {
+    const command = commandFrom(options); calls.push(command);
+    return Promise.resolve(command.cmd === 'render_template' ? rendered() : response({ type: kind === 'terminal' ? 'terminal_created' : 'ok', id: 'created', kind, name: 'Environment target', group: 'Foundation', parent_id: '' }));
+  }));
+  const { close } = setup(kind); await ready();
+  fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Environment target' } });
+  fireEvent.change(screen.getByLabelText('Environment variables'), { target: { value: '  # comment\n QA_SPACES =  exact value  \nQA_EQUALS=a=b=c\nQA_EMPTY=\nQA_ONLY_SPACES=   \ninvalid line' } });
+  fireEvent.click(screen.getByRole('button', { name: `Create ${kind}` }));
+  await waitFor(() => expect(close).toHaveBeenCalledOnce());
+  expect(calls.find((command) => command.cmd === `add_${kind}`)?.env_vars).toEqual({ QA_SPACES: '  exact value  ', QA_EQUALS: 'a=b=c', QA_EMPTY: '', QA_ONLY_SPACES: '   ' });
+});
+
+it('launches untouched resolved environment values without trimming them', async () => {
+  const environment = { QA_SPACES: '  inherited value  ', QA_EMPTY: '', QA_EQUALS: 'a=b=c' }; const calls: TorqueCommand[] = [];
+  vi.stubGlobal('fetch', mockFetch((_url, options) => {
+    const command = commandFrom(options); calls.push(command);
+    return Promise.resolve(command.cmd === 'render_template' ? rendered('', { env_vars: environment }) : response({ type: 'ok', id: 'created', kind: 'worker', name: 'Inherited environment', group: 'Foundation' }));
+  }));
+  const { close } = setup(); await ready(); fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Inherited environment' } }); fireEvent.click(screen.getByRole('button', { name: 'Create worker' }));
+  await waitFor(() => expect(close).toHaveBeenCalledOnce()); expect(calls.find((command) => command.cmd === 'add_worker')?.env_vars).toEqual(environment);
+});

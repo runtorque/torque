@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 
 path = Path(sys.argv[1])
-keys = ["QA_GROUP", "QA_TERMINAL", "QA_OVERLAP", "QA_FILE", "QA_INIT", "QA_SHELL"]
+keys = ["QA_GROUP", "QA_AGENT", "QA_EMPTY", "QA_TERMINAL", "QA_OVERLAP", "QA_FILE", "QA_INIT", "QA_SHELL"]
 with path.open("w") as output:
     output.write(json.dumps({"kind": "launch", "directory": os.getcwd(), "args": sys.argv[2:],
                              "env": {key: os.environ.get(key) for key in keys}}) + "\n")
