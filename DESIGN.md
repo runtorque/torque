@@ -3843,3 +3843,12 @@ D-217 clarification (2026-09-30): arbitrary map values, including environment va
 - Send an explicitly selected task as `merge_task_id`. Preserve selection through ordinary deltas, reconnects and refused operations. Scope the selection to the worker, worktree path and branch so another target cannot inherit it. If the selected task is no longer available/assigned, retain its identity visibly and require a new choice before merging.
 - Freeze the selection during a pending or uncertain operation; exact-key retries retain the submitted attribution. For a released assignment, the server requires an explicit selection plus matching group, recording worker, repository, branch, base branch, open status and a recorded commit. Reassigned tasks remain blocked. Include recording-worker and commit provenance in compact boundary snapshots so the selector can apply the same eligibility rules. Existing automatic attribution and all later merge gates remain unchanged.
 - This deliberately completes a workflow that Classic also cannot express: its merge command omits explicit attribution, and completion releases the live assignment, so reported work can otherwise produce a server refusal with no selectable recovery. Do not reopen completed tasks merely to satisfy automatic attribution.
+
+
+### D-220 — Restore terminal name suggestions without replacing drafts
+
+- Date: 2026-09-30
+- Scope: New Terminal and group `terminal_name_prefix`, P-373.
+- A saved nonempty terminal prefix suggests the lowest unused positive suffix, matching Classic's workspace-wide name collision check. The setting belongs to the creation group; collisions include other groups. With no prefix, keep the explicit empty name field. Other agent kinds do not inherit terminal names.
+- Suggestions may hydrate with incoming group defaults until the operator edits the name. Manual text and explicit clearing remain authoritative through deltas, reconnects and kind changes. A cleared required name keeps creation disabled.
+- Freeze the exact submitted identity before creation so a newly visible record or changed prefix cannot alter the displayed name during pending delivery or retry. Existing creation receipt and duplicate-prevention rules remain authoritative.

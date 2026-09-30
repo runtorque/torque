@@ -143,3 +143,39 @@ it('launches untouched resolved environment values without trimming them', async
   const { close } = setup(); await ready(); fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Inherited environment' } }); fireEvent.click(screen.getByRole('button', { name: 'Create worker' }));
   await waitFor(() => expect(close).toHaveBeenCalledOnce()); expect(calls.find((command) => command.cmd === 'add_worker')?.env_vars).toEqual(environment);
 });
+
+it('suggests unused terminal names across groups and preserves edits and explicit clearing through refreshed defaults', () => {
+  const { store } = setup('terminal');
+  act(() => { store.dispatch(projectionActions.snapshotReceived({ ...compactStateFixture, agents: { one: { id: 'one', name: 'Console 1', group: 'Foundation', kind: 'terminal' }, peer: { id: 'peer', name: 'Console 2', group: 'Other', kind: 'terminal' } }, group_settings: { Foundation: { terminal_name_prefix: 'Console' } } })); });
+  const input = screen.getByLabelText<HTMLInputElement>('Name'); expect(input).toHaveValue('Console 3');
+  fireEvent.change(input, { target: { value: 'My terminal' } }); input.focus(); input.setSelectionRange(2, 5);
+  act(() => { store.dispatch(projectionActions.auxiliaryResourceReceived({ type: 'group_settings', group: 'Foundation', settings: { terminal_name_prefix: 'Changed' } })); store.dispatch(connectionActions.connected({ at: 2, reconnect: true })); });
+  expect(screen.getByLabelText('Name')).toBe(input); expect(input).toHaveValue('My terminal'); expect(input).toHaveFocus(); expect([input.selectionStart, input.selectionEnd]).toEqual([2, 5]);
+  fireEvent.change(input, { target: { value: '' } });
+  act(() => { store.dispatch(projectionActions.auxiliaryResourceReceived({ type: 'group_settings', group: 'Foundation', settings: { terminal_name_prefix: 'Another' } })); });
+  expect(input).toHaveValue(''); expect(screen.getByRole('button', { name: 'Create terminal' })).toBeDisabled();
+});
+
+it('uses terminal prefixes only for terminals and keeps absent prefixes unnamed', async () => {
+  vi.stubGlobal('fetch', mockFetch(() => Promise.resolve(rendered())));
+  const { store } = setup('terminal'); expect(screen.getByLabelText('Name')).toHaveValue('');
+  act(() => { store.dispatch(projectionActions.auxiliaryResourceReceived({ type: 'group_settings', group: 'Foundation', settings: { terminal_name_prefix: 'Console' } })); });
+  expect(screen.getByLabelText('Name')).toHaveValue('Console 1');
+  fireEvent.change(screen.getByLabelText('Agent kind'), { target: { value: 'worker' } }); await ready(); expect(screen.getByLabelText('Name')).toHaveValue('');
+  fireEvent.change(screen.getByLabelText('Agent kind'), { target: { value: 'terminal' } }); expect(screen.getByLabelText('Name')).toHaveValue('Console 1');
+});
+
+it('freezes a suggested terminal name at submission while refreshed records and defaults arrive', async () => {
+  const calls: TorqueCommand[] = []; let release: (value: UnknownRecord) => void = () => { throw new Error('not pending'); };
+  vi.stubGlobal('fetch', mockFetch((_url, options) => { calls.push(commandFrom(options)); return new Promise((resolve) => { release = (value) => resolve({ ok: true, json: () => Promise.resolve(value) }); }); }));
+  const { store, close } = setup('terminal');
+  act(() => { store.dispatch(projectionActions.auxiliaryResourceReceived({ type: 'group_settings', group: 'Foundation', settings: { terminal_name_prefix: 'Console' } })); });
+  fireEvent.click(screen.getByRole('button', { name: 'Create terminal' }));
+  expect(calls[0]).toMatchObject({ cmd: 'add_terminal', name: 'Console 1' });
+  act(() => { store.dispatch(projectionActions.snapshotReceived({ ...compactStateFixture, agents: { created: { id: 'created', name: 'Console 1', kind: 'terminal', group: 'Foundation' } }, group_settings: { Foundation: { terminal_name_prefix: 'Changed' } } })); });
+  expect(screen.getByLabelText('Name')).toHaveValue('Console 1');
+  await act(async () => { release({ ok: false, error: 'QA refusal' }); await Promise.resolve(); });
+  fireEvent.click(screen.getByRole('button', { name: 'Retry same creation' })); expect(calls[1]).toEqual(calls[0]);
+  await act(async () => { release({ ok: true, data: { type: 'terminal_created', id: 'created', kind: 'terminal', name: 'Console 1', group: 'Foundation', parent_id: '' } }); await Promise.resolve(); });
+  expect(close).toHaveBeenCalledOnce();
+});

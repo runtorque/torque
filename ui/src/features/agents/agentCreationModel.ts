@@ -41,3 +41,12 @@ export function incompleteCreationTarget(frame: UnknownRecord, command: TorqueCo
   }
   return { type: hire ? 'pending_hire' : 'agent', id: text(target.id), name: text(target.name) };
 }
+
+/** Match Classic's workspace-wide collision check for terminal prefix names. */
+export function suggestedTerminalName(prefix: string, records: UnknownRecord): string {
+  if (!prefix) return '';
+  const names = new Set(Object.values(records).map((value) => text(record(value).name)));
+  let suffix = 1;
+  while (names.has(`${prefix} ${suffix}`)) suffix++;
+  return `${prefix} ${suffix}`;
+}

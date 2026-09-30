@@ -7,8 +7,8 @@ import { settingsRequest } from '../control/settingsRequests';
 import type { TorqueCommand } from '../../protocol';
 import { useAppSelector } from '../../app/hooks';
 import { useSettingsProtection } from '../../app/settingsNavigation';
-import { selectAgentSettingsDefaults, selectConnection } from '../../app/store';
-import { initialLaunchDraft, resolvedLaunchDraft, validateTemplateResponse, type LaunchDraft } from './agentCreationModel';
+import { selectAgentSettingsDefaults, selectAgentsState, selectConnection } from '../../app/store';
+import { initialLaunchDraft, resolvedLaunchDraft, suggestedTerminalName, validateTemplateResponse, type LaunchDraft } from './agentCreationModel';
 import type { AgentViewModel } from './model';
 import { creationClassDisabledReason, creationClassLabel, useCreationClasses } from './useCreationClasses';
 import { useCreationRoles } from './useCreationRoles';
@@ -86,7 +86,7 @@ export function AgentCreateDialog({
   const [group] = useState(initialGroup);
   const connection = useAppSelector(selectConnection);
   const [kind, setKind] = useState<CreateKind>(initialKind);
-  const [name, setName] = useState('');
+  const [nameDraft, setName] = useState<string | null>(null);
   const [agentClassId, setAgentClassId] = useState('');
   const [template, setTemplate] = useState('');
   const [hiringArchitectId, setHiringArchitectId] = useState('');
@@ -94,6 +94,10 @@ export function AgentCreateDialog({
   const [customInstructions, setCustomInstructions] = useState('');
   const [autonomyMode, setAutonomyMode] = useState('');
   const defaults = useAppSelector(selectAgentSettingsDefaults);
+  const existingAgents = useAppSelector(selectAgentsState).records;
+  const name = nameDraft ?? (kind === 'terminal'
+    ? suggestedTerminalName(text(record(defaults.groups[group]).terminal_name_prefix), existingAgents)
+    : '');
   const inheritedSpecializations = record(defaults.groups[group]).default_engineer_specializations;
   const [specializationDraft, setSpecializations] = useState<string | null>(null);
   const specializations = specializationDraft ?? (Array.isArray(inheritedSpecializations) ? inheritedSpecializations.filter((item): item is string => typeof item === 'string').join(', ') : '');
@@ -172,7 +176,7 @@ export function AgentCreateDialog({
   const architects = agents.filter((agent) => agent.kind === 'architect');
   const parents = agents.filter((agent) => agent.cellType === 'agent');
 
-  const create = (payload: TorqueCommand) => { setSpecializations(specializations); creation.create(payload, kind); };
+  const create = (payload: TorqueCommand) => { setName(text(payload.name)); setSpecializations(specializations); creation.create(payload, kind); };
 
   const submit = () => {
     const identity = name.trim();

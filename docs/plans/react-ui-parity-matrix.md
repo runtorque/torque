@@ -390,6 +390,8 @@ Sources below are relative to `static/js/`; React owners are under `ui/src/`. Al
 | P-371 | Creation: literal environment values | Required | Classic `modals/add-cell.js` and `_textToEnv`; D-185 literal map contract | AgentCreateDialog; D-217 | Preserve inherited and explicit whitespace, empty values and equals signs through actual launch; verify group/agent fallback and clearing. |
 | P-372 | Worktree merge: explicit completed-task attribution | Required | Classic `commands.js` merge flow also lacks the explicit attribution required by current daemon gates; D-219 | WorktreeInspector | Select an assigned task or this worker’s matching released open boundary, preserve selection/focus through reconnect/refusal, send its exact ID, block reassigned selection and freeze attribution during uncertain retry; verify actual merge and retained boundary diff. |
 
+| P-373 | Terminal creation: saved name-prefix suggestion | Required | `modals/add-cell.js`; `commands.js::_nextName`; D-220 | AgentCreateDialog | Save/reopen the group prefix, suggest an unused suffix across groups, create the suggested name, preserve custom text/caret and explicit clearing through reconnect, and freeze submitted names during refusal/retry. |
+
 ## Command inventory
 
 Each literal classic transport command is inventoried independently. Dynamic command families and native operations are covered by the behavior rows and the source inventory below. A React occurrence does not establish a discoverable control, correct payload, response handling or parity. These are required verification rows unless a specific retirement decision says otherwise.
@@ -846,7 +848,7 @@ Acceptance for **each field**: hydrate its server value, change it using the lis
 | `guidance_hint_cadence` | Group | Number | 0=every time; otherwise 1st, then every N |
 | `context_default_ttl_days` | Group | Number | Shared Context entry lifetime, clamped to 1..60. |
 | `engineer_hint_snoozes` | Group | Runtime record · read-only in this inventory | Managed by group/agent identity, attention or hint workflows; excluded from reset/save. |
-| `terminal_name_prefix` | Group | Text | Server value/default |
+| `terminal_name_prefix` | Group | Text | Saved/reopened prefix suggests the lowest globally unused numbered name in New Terminal. Actual creation, manual overrides, explicit clearing and reconnect/refusal retention are verified under P-373. |
 | `terminal_boot_command` | Group | Text | Real-PTY Settings acceptance verifies inherited boot command without a creation override; see terminal runtime checkpoint below. |
 | `terminal_command_args` | Group | Text | Quoted arguments containing spaces reach the real process; explicit creation arguments override the saved default. |
 | `terminal_init_script` | Group | Text | Existing shell-script path, sourced before the command; paths containing spaces and exported initialization values verified in a real PTY. |
@@ -2538,3 +2540,19 @@ The required full `make test TEST_PYTHON=/Users/aleksanderarruda/.torque/runtime
 An additional live batch passed **5/5 in 1.5 minutes** for Activity, Planning, Settings, paused Supervisor/Logs and Pipelines lazy/reconnect behavior (`/private/tmp/parity-lazy-reconnect-20260930.log`). This strengthens P-112 acceptance without certifying every inventory/native/recovery path. Documentation contracts and diff checks passed. The complete browser suite was not rerun. The disposable QA profile on port 19079 is retained for the next isolated acceptance scenario; no default daemon was touched.
 
 Ledger: **372 mapped / 364 implemented or equivalent / four broad open / four intentional retirements**. P-087/P-088/P-089/P-112 and independent completion gates remain open. The next field audit has independently reproduced a terminal-name-prefix creation gap; it requires its own repair and acceptance checkpoint.
+
+
+### Terminal name-prefix repair awaiting acceptance (2026-09-30)
+
+The field audit reproduced P-373 in a live browser: a prefix saved and reloaded through React Settings still produced an empty required name in New Terminal (`/private/tmp/terminal-name-prefix-red-20260930.log`). Classic prefills a workspace-wide unused suffix. Three component regressions also failed before the fix (`/private/tmp/terminal-name-components-red-20260930.log`). D-220 restores the suggestion while retaining explicit edits/clearing and freezing submitted names for exact recovery. Full UI and final browser acceptance are pending. Pending ledger: **373 mapped / 364 implemented or equivalent / five open / four intentional retirements**.
+
+
+### Terminal name-prefix acceptance (2026-09-30)
+
+P-373/D-220 is accepted. Three new regressions first failed, then all **34 focused creation/recovery tests** passed (`/private/tmp/terminal-name-components-green-20260930.log`). Final `make ui-check` passed lint, typecheck, **112 files / 1,027 tests**, build and bundle verification (`/private/tmp/terminal-name-ui-check-final-20260930.log`). Its first attempt caught an unnecessary async test callback; removing that declaration did not alter its assertions.
+
+Final production browser **2/2 in 35.5 seconds** passed (`/private/tmp/terminal-name-runtime-final-20260930.log`). The new case saves/reopens the prefix, avoids existing suffixes in two groups, creates the suggested name, preserves edited text/focus/caret through changed defaults and reconnect, retries an identical refused creation, and retains explicit clearing. The adjacent terminal runtime case again verifies actual inherited/overridden process arguments, environment, directory, shell and close-on-disconnect behavior. The screenshot was inspected; it captured the existing modal entry fade, so it is semantic/draft-state evidence rather than a settled visual baseline. No layout or styling changed.
+
+No backend/protocol implementation changed after the preceding full **3,276-test / 82-skip** pass, so that suite was not repeated. Documentation contracts and diff checks passed. The complete browser and native suites were not rerun. QA ended with zero PTYs; exact daemon/ingest/supervisor PIDs 24563/24577/24578 were stopped and their absence and port 19079 release verified.
+
+Ledger: **373 mapped / 365 implemented or equivalent / four broad open / four intentional retirements**. P-087/P-088/P-089/P-112 and independent acceptance gates remain open. Next field-level work includes companion-terminal directory precedence and a source-backed disposition for the remaining stored profile/color/backend settings; their presence or persistence alone does not prove a runtime effect.
