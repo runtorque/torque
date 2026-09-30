@@ -621,9 +621,7 @@ class StateLifecycleMixin:
         # Max agents cap
         if cell_type == "agent" and not parent_id:
             if gs.max_agents > 0:
-                current = sum(1 for aid in self.groups.get(group, [])
-                              if self.agents.get(aid)
-                              and self.agents[aid].cell_type == "agent")
+                current = self.group_agent_count(group)
                 if current >= gs.max_agents:
                     log.warning("Group '%s' at max_agents cap (%d)",
                                 group, gs.max_agents)

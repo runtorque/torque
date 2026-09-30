@@ -687,6 +687,20 @@ describe('workspace shell', () => {
     expect(screen.getByRole('textbox', { name: 'Message Audit Terminal' })).toBeVisible();
   });
 
+  it('disables agent creation choices at capacity, keeps terminals available and follows limit changes', () => {
+    pendingActivityReads();
+    const frame = { ...compactStateFixture, group_settings: { Foundation: { max_agents: 1 } } };
+    const { appStore } = renderShell(browserHost, frame);
+    fireEvent.click(screen.getByRole('button', { name: /Agents/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Create agent or terminal' }));
+    expect(screen.getByRole('menuitem', { name: 'Agent limit reached (1/1)' })).toHaveAttribute('aria-disabled', 'true');
+    for (const kind of ['Architect', 'Engineer', 'Worker']) expect(screen.getByRole('menuitem', { name: `New ${kind}…` })).toHaveAttribute('aria-disabled', 'true');
+    expect(screen.getByRole('menuitem', { name: 'New Terminal…' })).not.toHaveAttribute('aria-disabled', 'true');
+    act(() => { appStore.dispatch(projectionActions.snapshotReceived({ ...frame, group_settings: { Foundation: { max_agents: 0 } } })); });
+    expect(screen.queryByRole('menuitem', { name: /Agent limit reached/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'New Worker…' })).not.toHaveAttribute('aria-disabled', 'true');
+  });
+
   it('creates a worker after matched backend acknowledgement and selects its returned ID', async () => {
     const commands: TorqueCommand[] = [];
     vi.stubGlobal('fetch', vi.fn((_url: string, options: RequestInit) => {

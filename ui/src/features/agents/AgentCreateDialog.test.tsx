@@ -21,6 +21,37 @@ const mockFetch = (handler: (url: string, options: RequestInit) => unknown) => v
 const commandFrom = (options: RequestInit) => JSON.parse(typeof options.body === 'string' ? options.body : '{}') as TorqueCommand;
 afterEach(() => vi.unstubAllGlobals());
 describe('agent creation', () => {
+  it.each(['worker', 'engineer', 'architect'] as const)('retains the %s draft when capacity fills, blocks submission, and resumes after deletion', async (kind) => {
+    const calls: TorqueCommand[] = [];
+    vi.stubGlobal('fetch', mockFetch((_url, options) => {
+      const command = commandFrom(options); calls.push(command);
+      return Promise.resolve(command.cmd === 'render_template' ? rendered() : response({ id: 'created', kind, name: 'Retained draft' }));
+    }));
+    const { store, close } = setup(kind); await ready();
+    const name = screen.getByLabelText<HTMLInputElement>('Name');
+    fireEvent.change(name, { target: { value: 'Retained draft' } }); name.focus(); name.setSelectionRange(3, 7);
+    const snapshot = (deleted_at = 0) => { act(() => { store.dispatch(projectionActions.snapshotReceived({ ...compactStateFixture, agents: { full: { kind: 'worker', group: 'Foundation', deleted_at } }, group_settings: { Foundation: { max_agents: 1 } } })); }); };
+    snapshot();
+    expect(screen.getByText(/Agent limit reached/)).toHaveTextContent('1/1');
+    expect(screen.getByRole('button', { name: `Create ${kind}` })).toBeDisabled();
+    expect(name).toHaveFocus(); expect(name.selectionStart).toBe(3); expect(name.selectionEnd).toBe(7);
+    fireEvent.submit(name.closest('form')!); expect(calls.filter((call) => call.cmd !== 'render_template')).toHaveLength(0);
+    snapshot(123); await ready();
+    expect(name).toHaveValue('Retained draft');
+    fireEvent.click(screen.getByRole('button', { name: `Create ${kind}` }));
+    await waitFor(() => expect(close).toHaveBeenCalledOnce());
+  });
+  it.each(['terminal', 'hire'] as const)('allows a %s at the agent limit', async (target) => {
+    vi.stubGlobal('fetch', mockFetch(() => Promise.resolve(target === 'hire' ? response({ hire_id: 'hire', status: 'pending' }) : response({ type: 'terminal_created', id: 'terminal', kind: 'terminal', name: 'Allowed', parent_id: '' }))));
+    const { store, close } = setup(target === 'hire' ? 'engineer' : 'terminal');
+    act(() => { store.dispatch(projectionActions.snapshotReceived({ ...compactStateFixture, group_settings: { Foundation: { max_agents: 1 } } })); });
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Allowed' } });
+    if (target === 'hire') fireEvent.change(screen.getByLabelText('Hiring Architect'), { target: { value: 'arch' } });
+    expect(screen.queryByText(/Agent limit reached/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: target === 'hire' ? 'Request hire' : 'Create terminal' }));
+    await waitFor(() => expect(close).toHaveBeenCalledOnce());
+  });
+
   it.each(['worker', 'architect', 'engineer', 'terminal'] as const)('acknowledges %s creation before closing and selects the returned target', async (kind) => {
     const calls: TorqueCommand[] = [];
     vi.stubGlobal('fetch', mockFetch((_url: string, options: RequestInit) => {
@@ -84,8 +115,10 @@ describe('agent creation', () => {
   it('rejects mismatched acknowledgement and freezes the reviewed request for exact recovery', async () => {
     const calls: TorqueCommand[] = [];
     vi.stubGlobal('fetch', mockFetch((_url: string, options: RequestInit) => { calls.push(commandFrom(options)); return Promise.resolve(response({ id: 'wrong', name: 'Wrong name', kind: 'worker' })); }));
-    const { close } = setup('architect'); fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Original' } }); fireEvent.click(screen.getByRole('button', { name: 'Create architect' }));
+    const { store, close } = setup('architect'); fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Original' } }); fireEvent.click(screen.getByRole('button', { name: 'Create architect' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Could not confirm'); expect(close).not.toHaveBeenCalled();
+    act(() => { store.dispatch(projectionActions.snapshotReceived({ ...compactStateFixture, group_settings: { Foundation: { max_agents: 1 } } })); });
+    expect(screen.queryByText(/Agent limit reached/)).not.toBeInTheDocument();
     expect(screen.getByLabelText('Name')).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: 'Retry same creation' }));
     await waitFor(() => expect(calls).toHaveLength(2)); expect(calls[1]).toEqual(calls[0]);

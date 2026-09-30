@@ -50,3 +50,13 @@ export function suggestedTerminalName(prefix: string, records: UnknownRecord): s
   while (names.has(`${prefix} ${suffix}`)) suffix++;
   return `${prefix} ${suffix}`;
 }
+
+/** Stopped/dismissed agents retain seats; terminals and soft deletions do not. */
+export function groupAgentCapacity(records: UnknownRecord, group: string, maximum: unknown) {
+  const count = Object.values(records).filter((value) => {
+    const agent = record(value);
+    return agent.group === group && agent.cell_type !== 'terminal' && agent.kind !== 'terminal' && !(Number(agent.deleted_at) > 0);
+  }).length;
+  const limit = Number(maximum) || 0;
+  return { count, limit, full: limit > 0 && count >= limit };
+}

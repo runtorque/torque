@@ -3898,3 +3898,13 @@ D-217 clarification (2026-09-30): arbitrary map values, including environment va
 - Show and submit launch-time worktree controls only for Workers. Engineer creation forces a shared directory; Architect creation follows the daemon's internal worktree policy. Their handlers do not honor these creation-form overrides, and Classic principal settings dialogs do not offer them.
 - Keep a Worker's edited worktree name/base/checkpoint options when switching kinds and back, but do not submit those hidden values for a principal. Do not promise a worktree override in the general creation description.
 - Preserve the explicit post-launch Worktree Create flow for both principal kinds, including review of conversation loss, cancellation without mutation, and confirmed creation/relaunch. Removing ignored launch inputs does not retire that supported workflow or change backend policy.
+
+
+### D-226 — Apply agent capacity to retained agents and preserve creation drafts
+
+- Date: 2026-09-30
+- Scope: Group Maximum agents, creation menu/dialog and fresh reviewer allocation; P-380.
+- Count non-deleted Workers, Engineers and Architects in the group, including stopped and dismissed agents. Terminals and recoverable deletions consume no seats. Zero means unlimited. Creation and fresh reviewer allocation share the backend count.
+- At capacity, explain the count and limit beside disabled new-agent menu choices; keep Terminal available. A creation dialog opened by another entry point or before capacity changes blocks new agent submission while retaining all fields, focus and caret. Explain how to free a seat or change Maximum agents.
+- A pending hire is an approval proposal and remains available; actual allocation still observes the backend limit. Restoring a deleted agent remains permitted even above the limit, while further new creation is blocked.
+- An uncertain creation retains its exact recovery request. Its own saved target may consume the last slot, so capacity feedback must not prevent receipt recovery or suggest making a second creation.

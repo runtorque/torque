@@ -36,6 +36,7 @@ import {
 } from './model';
 import { AgentDetailWorkspace } from './AgentDetailWorkspace';
 import { AgentCreateDialog } from './AgentCreateDialog';
+import { groupAgentCapacity } from './agentCreationModel';
 import styles from './AgentWorkspace.module.css';
 import { WorktreeInspector } from './WorktreeInspector';
 import { useWorktreeToolbar } from './useWorktreeToolbar';
@@ -255,7 +256,8 @@ export interface AgentWorkspaceProps {
 export function AgentWorkspace({ group, host, sendCommand, onCommandUnavailable, terminalOnly = false, active = true }: AgentWorkspaceProps) {
   const dispatch = useAppDispatch();
   const worktreeToolbar = useWorktreeToolbar(active);
-  const focusOnClick = useAppSelector(selectAgentSettingsDefaults).global.focus_on_click === true;
+  const settingsDefaults = useAppSelector(selectAgentSettingsDefaults);
+  const focusOnClick = settingsDefaults.global.focus_on_click === true;
   const activationSequence = useRef(0);
   const [activation, setActivation] = useState<{ id: string; sessionId: AgentViewModel['sessionId']; token: number } | null>(null);
   const { records, digestSettings, digestBufferStats, digestSentEvents, engineerBufferStats, engineerSentEvents } = useAppSelector(selectAgentsState);
@@ -327,7 +329,8 @@ export function AgentWorkspace({ group, host, sendCommand, onCommandUnavailable,
     } catch { onCommandUnavailable(); }
   };
 
-  const agentCount = hierarchy.all.filter((agent) => agent.cellType === 'agent').length;
+  const capacity = groupAgentCapacity(records, group, asRecord(settingsDefaults.groups[group]).max_agents);
+  const agentCount = capacity.count;
   const terminalCount = hierarchy.all.filter((agent) => agent.cellType === 'terminal').length;
   const focusStep = (direction: number) => {
     if (!orderedAgents.length) return;
@@ -363,7 +366,7 @@ export function AgentWorkspace({ group, host, sendCommand, onCommandUnavailable,
 
   return (
     <section className={styles.workspace} aria-labelledby="agents-heading">
-      <header className={styles.workspaceHeader}><div><p>Workspace / {group}</p><h1 id="agents-heading">Agents</h1></div><div><span>{agentCount} {agentCount === 1 ? 'agent' : 'agents'}{terminalCount ? ` · ${terminalCount} ${terminalCount === 1 ? 'terminal' : 'terminals'}` : ''}</span>{deletedAgents.length ? <Button tone="quiet" onPress={() => setDeletedOpen(true)}>Recently deleted · {deletedAgents.length}</Button> : null}<ActionMenu label="Create agent or terminal" trigger={<Button tone="primary" aria-label="Create agent or terminal">＋ New</Button>}><ActionMenuItem onAction={() => openCreate('architect')}>New Architect…</ActionMenuItem><ActionMenuItem onAction={() => openCreate('engineer')}>New Engineer…</ActionMenuItem><ActionMenuItem onAction={() => openCreate('worker')}>New Worker…</ActionMenuItem><ActionMenuItem onAction={() => openCreate('terminal')}>New Terminal…</ActionMenuItem></ActionMenu>{hasHostCapability(host, 'detach-panel') ? <span className={styles.detachIconWrap} title="Detach Agents workspace"><Button className={styles.detachIcon ?? ''} tone="quiet" aria-label="Detach Agents workspace" onPress={() => { void detachAgents(); }}>↗</Button></span> : null}</div></header>
+      <header className={styles.workspaceHeader}><div><p>Workspace / {group}</p><h1 id="agents-heading">Agents</h1></div><div><span>{agentCount} {agentCount === 1 ? 'agent' : 'agents'}{terminalCount ? ` · ${terminalCount} ${terminalCount === 1 ? 'terminal' : 'terminals'}` : ''}</span>{deletedAgents.length ? <Button tone="quiet" onPress={() => setDeletedOpen(true)}>Recently deleted · {deletedAgents.length}</Button> : null}<ActionMenu label="Create agent or terminal" trigger={<Button tone="primary" aria-label="Create agent or terminal">＋ New</Button>}>{capacity.full ? <ActionMenuItem isDisabled>Agent limit reached ({capacity.count}/{capacity.limit})</ActionMenuItem> : null}<ActionMenuItem isDisabled={capacity.full} onAction={() => openCreate('architect')}>New Architect…</ActionMenuItem><ActionMenuItem isDisabled={capacity.full} onAction={() => openCreate('engineer')}>New Engineer…</ActionMenuItem><ActionMenuItem isDisabled={capacity.full} onAction={() => openCreate('worker')}>New Worker…</ActionMenuItem><ActionMenuItem onAction={() => openCreate('terminal')}>New Terminal…</ActionMenuItem></ActionMenu>{hasHostCapability(host, 'detach-panel') ? <span className={styles.detachIconWrap} title="Detach Agents workspace"><Button className={styles.detachIcon ?? ''} tone="quiet" aria-label="Detach Agents workspace" onPress={() => { void detachAgents(); }}>↗</Button></span> : null}</div></header>
       {!hierarchy.all.length ? <div className={styles.emptyAgents}>
         <StateSurface title="Start an agent workspace" description="Create an Architect or Engineer to lead work, a Worker for a focused task, or a standalone terminal for direct shell access." action={<div className={styles.emptyAgentActions}><Button tone="primary" onPress={() => openCreate('worker')}>Create Worker</Button><Button tone="quiet" onPress={() => openCreate('terminal')}>Open Terminal</Button></div>} />
       </div> : <div className={styles.split}>

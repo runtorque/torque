@@ -400,6 +400,8 @@ Sources below are relative to `static/js/`; React owners are under `ui/src/`. Al
 | P-378 | Board: general task creation inherits saved group lane | Required | `modals/task-modal.js::openAddTask` leaves general creation lane empty; `commands/board_operations.py` resolves defaults | TaskCreateDialog; D-224 | General New task honors the saved lane; explicit choices survive reconnect/refusal; clearing defaults restores fallback. Verify real task lane, labels and action. |
 | P-379 | Principal creation: worktree control applicability | Required | `modals/agent-settings.js::_agentSettingsCreatePayload`; principal launch resolvers | AgentCreateDialog; D-225 | Principals omit ignored worktree inputs/payloads; worker drafts survive kind switches; both principals retain reviewed post-launch worktree creation and relaunch. |
 
+| P-380 | Creation: Group agent capacity and deletion recovery | Required | `commands.js::_agentGridNewMenuItems; grid/group-tabs.js` | AgentWorkspace / AgentCreateDialog; state capacity; D-226 | Saved positive limits disable agent choices, preserve an open draft across changing capacity/reconnect, allow terminals/hire proposals and exact recovery; deletion frees creation/reviewer seats; zero removes the limit. |
+
 ## Command inventory
 
 Each literal classic transport command is inventoried independently. Dynamic command families and native operations are covered by the behavior rows and the source inventory below. A React occurrence does not establish a discoverable control, correct payload, response handling or parity. These are required verification rows unless a specific retirement decision says otherwise.
@@ -2718,3 +2720,26 @@ Both live principal scenarios failed against the previous production build becau
 No backend/protocol implementation changed. Full make test and the entire browser/native suites were not repeated. The current browser inventory is 183 tests / 116 files (/private/tmp/principal-worktree-browser-inventory-20260930.txt). Documentation contracts and diff checks passed. QA profile react-principal-worktree-20260930 on port 19086 ended with zero PTYs; daemon 86026, ingest 86044 and supervisor 86051 exited and the port was released. Final identity is retained in /private/tmp/principal-worktree-runtime-final-20260930.json. The default daemon was untouched.
 
 Ledger: **379 mapped / 372 implemented or equivalent / three broad open / four intentional retirements**. P-087, P-088 and P-112 remain open. The next P-088 source audit identified missing pre-creation capacity feedback: Classic uses max_agents to disable new-agent choices, whereas React currently permits opening/submitting creation and relies on the backend cap. This needs focused/live reproduction before its repair is accepted. Guidance cadence, Context TTL, dispatch-lane effects and default-role launch evidence also need explicit reconciliation; numeric persistence alone does not prove those downstream effects. The independent inventory/recovery/native/full-browser and Phase 4 gates remain unproven.
+
+
+### Group agent capacity repair under acceptance (2026-09-30)
+
+P-380 reproduces missing React pre-creation feedback and a backend mismatch: recoverable deletions remained in group membership and consumed creation/reviewer capacity, while Classic excludes them from its visible count. Two backend regressions failed at deleted-seat reuse; four React regressions failed at missing menu/dialog feedback. An initial backend fixture did not persist Group Settings and was corrected before recording the definitive failure.
+
+Creation and reviewer allocation now share the retained-agent count. React disables new agent choices with an explicit count, preserves drafts when a group fills, and allows terminals, hire proposals and exact uncertain-outcome recovery. Focused checks passed three backend tests and 127 React tests. A real-daemon scenario and the full regression gates are pending. Ledger during acceptance: **380 mapped / 372 implemented or equivalent / four open / four intentional retirements**. Broad P-087/P-088/P-112 and independent migration gates remain open.
+
+
+Capacity live acceptance passed **3/3 in 45.2 seconds**, including the new saved-limit scenario and the two existing creation-recovery scenarios. The new test saves/reloads Maximum agents, exercises terminal/other-group exclusions, confirms deleted records remain recoverable while freeing a slot, preserves Name selection and Boot command across reconnect at capacity, and recovers one real Worker after its first response is lost. The retry uses the same idempotency key despite consuming the last seat. Zero permits further creation. The draft screenshot and actual saved-agent/command JSON were inspected. Log: /private/tmp/agent-capacity-browser-20260930.log.
+
+Final make ui-check passed lint/typecheck, **113 files / 1,057 tests**, production build and bundle verification (/private/tmp/agent-capacity-ui-check-20260930.log). Browser inventory is **184 tests / 117 files**; the complete browser and native suites were not rerun. Documentation contracts checked 72 Markdown files and git diff --check passed. Full make test is still running, so P-380 acceptance remains pending its result.
+
+The isolated react-agent-capacity-20260930 runtime on port 19087 ended with zero PTYs. Daemon 96727, ingest 96840 and supervisor 96850 are absent and the port is free. Runtime identity: /private/tmp/agent-capacity-runtime-final-20260930.json. The default daemon was untouched.
+
+
+### Group capacity final acceptance (2026-09-30)
+
+P-380/D-226 is accepted. The required full make test passed **3,280 backend tests in 697.0 seconds, with 82 skips** (/private/tmp/agent-capacity-full-test-20260930.log). The initial browser batch overlapped installation-test bundle rebuilds, so it was repeated after the full suite exited and the final bundle passed verify:build. The frozen production-browser batch passed **3/3 in 45.0 seconds** (/private/tmp/agent-capacity-browser-frozen-20260930.log). Final screenshot and receipt/agent evidence were inspected and preserved in /private/tmp/agent-capacity-frozen-artifacts-20260930.
+
+The fresh final QA profile on port 19088 ended with zero PTYs; daemon 16302, ingest 16316 and supervisor 16317 are absent and the port is free (/private/tmp/agent-capacity-frozen-runtime-final-20260930.json). Both disposable runtimes are stopped. The full browser inventory/native suites were not rerun.
+
+Ledger: **380 mapped / 373 implemented or equivalent / three broad open / four intentional retirements**. P-087 Global Settings, P-088 Group Settings and P-112 consolidated lazy/reconnect remain open. Capacity now has runtime evidence; Context expiry, guidance cadence, dispatch lane and default-role launch effects remain next checks. Global pipeline/event limits and perceived-empty settings currently have numeric validation evidence that must be reconciled with their runtime consumers. Independent inventory/recovery/native/full-browser gates and Phase 4 remain unproven.

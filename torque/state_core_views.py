@@ -62,6 +62,14 @@ class StateCoreViewsMixin:
             return None
         return cell
 
+    def group_agent_count(self, group: str) -> int:
+        """Count retained agent seats; terminals and recoverable deletions are free."""
+        return sum(
+            1 for agent_id in self.groups.get(group, [])
+            if (cell := self.get_active_agent(agent_id)) is not None
+            and cell.cell_type == "agent"
+        )
+
     def system_health_metrics(
         self, window: str = "24h", group: str = "", *,
         now: float | None = None,

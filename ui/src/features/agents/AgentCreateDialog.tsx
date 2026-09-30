@@ -8,7 +8,7 @@ import type { TorqueCommand } from '../../protocol';
 import { useAppSelector } from '../../app/hooks';
 import { useSettingsProtection } from '../../app/settingsNavigation';
 import { selectAgentSettingsDefaults, selectAgentsState, selectConnection } from '../../app/store';
-import { initialLaunchDraft, resolvedLaunchDraft, suggestedTerminalName, validateTemplateResponse, type LaunchDraft } from './agentCreationModel';
+import { groupAgentCapacity, initialLaunchDraft, resolvedLaunchDraft, suggestedTerminalName, validateTemplateResponse, type LaunchDraft } from './agentCreationModel';
 import type { AgentViewModel } from './model';
 import { creationClassDisabledReason, creationClassLabel, useCreationClasses } from './useCreationClasses';
 import { useCreationRoles } from './useCreationRoles';
@@ -176,11 +176,14 @@ export function AgentCreateDialog({
   const architects = agents.filter((agent) => agent.kind === 'architect');
   const parents = agents.filter((agent) => agent.cellType === 'agent');
 
+  const capacity = groupAgentCapacity(existingAgents, group, record(defaults.groups[group]).max_agents);
+  const capacityBlocked = capacity.full && kind !== 'terminal' && !(kind === 'engineer' && hiringArchitectId);
+
   const create = (payload: TorqueCommand) => { setName(text(payload.name)); setSpecializations(specializations); creation.create(payload, kind); };
 
   const submit = () => {
     const identity = name.trim();
-    if (locked || resolving || resolutionError || classError || roleError || !identity || !group) return;
+    if (locked || capacityBlocked || resolving || resolutionError || classError || roleError || !identity || !group) return;
     const agentSettings: Record<string, unknown> = {};
     const settingValues: Record<string, unknown> = {
       provider: provider.trim(),
@@ -268,6 +271,7 @@ export function AgentCreateDialog({
     isOpen={open}
     onOpenChange={(value) => { if (!value) requestClose(); }}
   >
+    {capacityBlocked && !locked ? <p role="status">Agent limit reached ({capacity.count}/{capacity.limit}). Remove an agent or increase Maximum agents in Group Settings. Your draft is retained.</p> : null}
     {error ? <p role="alert" tabIndex={-1} ref={errorElement}>{error}</p> : null}
     {locked && !saving ? creation.incomplete ? <section aria-label="Incomplete launch">
       <p>{creation.incomplete.type === 'agent' ? 'The target exists, but launch did not finish.' : 'The hire request was saved, but delivery did not finish. Review it in Planning.'} {creation.incomplete.name} · {creation.incomplete.id}</p>
@@ -352,7 +356,7 @@ export function AgentCreateDialog({
         </> : null}
       </section> : null}
 
-      <footer><Button tone="quiet" type="button" isDisabled={locked} onPress={requestClose}>Cancel</Button><Button tone="primary" type="submit" isDisabled={locked || resolving || Boolean(resolutionError) || Boolean(classError) || Boolean(roleError) || !name.trim()}>{saving ? 'Creating…' : kind === 'engineer' && hiringArchitectId ? 'Request hire' : `Create ${kind}`}</Button></footer>
+      <footer><Button tone="quiet" type="button" isDisabled={locked} onPress={requestClose}>Cancel</Button><Button tone="primary" type="submit" isDisabled={locked || capacityBlocked || resolving || Boolean(resolutionError) || Boolean(classError) || Boolean(roleError) || !name.trim()}>{saving ? 'Creating…' : kind === 'engineer' && hiringArchitectId ? 'Request hire' : `Create ${kind}`}</Button></footer>
       </fieldset>
     </form>
   </ModalDialog>;
