@@ -1178,6 +1178,19 @@ describe('workspace shell', () => {
     vi.unstubAllGlobals();
   });
 
+  it('renders custom ownership icons and updates or clears them without changing selection or row identity', () => {
+    const { appStore } = renderShell(browserHost, { ...compactStateFixture, agents: { engineer: { id: 'engineer', name: 'Evan', group: 'Foundation', kind: 'engineer', status: 'idle', icon: '◆' } } });
+    fireEvent.click(screen.getByRole('button', { name: /^⌁ Agents/ }));
+    const row = screen.getByRole('treeitem', { name: 'Evan, engineer, idle' }); fireEvent.click(row);
+    expect(within(row).getByText('◆')).toBeVisible(); expect(within(row).getByText('◆')).toHaveAttribute('aria-hidden', 'true');
+    for (const [index, icon] of ['◇', ''].entries()) {
+      act(() => { appStore.dispatch(projectionActions.deltaReceived({ type: 'delta', seq: 11 + index, ops: [{ op: 'agent_upsert', id: 'engineer', name: 'Evan', group: 'Foundation', kind: 'engineer', status: 'idle', icon }] })); });
+      expect(screen.getByRole('treeitem', { name: 'Evan, engineer, idle' })).toBe(row); expect(row).toHaveAttribute('aria-selected', 'true');
+      expect(within(row).queryByText('◆')).not.toBeInTheDocument();
+      if (icon) expect(within(row).getByText(icon)).toBeVisible(); else expect(within(row).queryByText('◇')).not.toBeInTheDocument();
+    }
+  });
+
   it('renders and collapses the Architect to Engineer to Worker ownership tree', () => {
     renderShell(browserHost, {
       ...compactStateFixture,

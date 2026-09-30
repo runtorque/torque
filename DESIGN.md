@@ -3870,3 +3870,13 @@ D-217 clarification (2026-09-30): arbitrary map values, including environment va
 - Request a worker-specific raw role preview. Share worker provider/command/model/reasoning override precedence with the executable launch resolver: worker defaults override role/shared values, and explicit launch edits override worker defaults. Preserve the existing distinct fast-mode order: explicit/role, worker, shared.
 - Keep preview commands raw; model/reasoning flags belong to backend launch finalization. Show the values that will be submitted, retain explicit edits on refresh/reconnect and freeze reviewed payloads for exact creation retries. Clearing stored worker defaults restores role/shared inheritance.
 - Keep generic role previews backward compatible for other consumers. This repairs a React request that previously promoted generic preview values into explicit overrides, bypassing worker-specific defaults.
+
+
+### D-223 — Honor principal overrides and expose supported creation controls
+
+- Date: 2026-09-30
+- Scope: New Engineer/Architect shell, icon and environment overrides; P-375/P-376 and P-371. Creation control applicability is P-377.
+- Forward explicit shell, icon and literal environment maps through the same principal launch resolver as provider, command and directory. Do not silently discard a field shown in creation. Preserve environment whitespace, empty values and equals signs; merge with inherited environment using existing launch rules. An untouched shell inherits kind/group defaults, so label its empty choice “Inherit defaults.”
+- Show separate command-argument and initialization-script controls only for terminals, matching Classic's terminal-only startup contract. Agent operators can include arguments in Boot command. Hidden terminal drafts must not be sent after switching to an agent kind. Show the icon control only for agents: terminal creation does not support an icon override. These controls were previously visible without consumers; no supported Classic workflow is retired.
+- Render a saved custom icon beside the ownership-row name while retaining its independent status dot. Treat the icon as decorative for accessibility; updates and clearing preserve row identity and selection.
+- Preserve sparse untouched principal defaults and per-agent settings precedence. Verify actual shell, environment and directory from a local process; resolved model/reasoning/fast-mode values do not by themselves prove provider inference or service-tier behavior when a custom command is used.

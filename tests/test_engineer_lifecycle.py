@@ -494,6 +494,7 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
             {
                 "name": "Alice",
                 "group": "torque",
+                "shell": "bash", "icon": "E", "env_vars": {"QA_AGENT": "  exact = value  ", "QA_EMPTY": ""},
                 "agent_settings": {
                     "provider": "codex",
                     "model": "gpt-first",
@@ -516,6 +517,7 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(resolver_calls, [{
             "provider": "codex", "model": "gpt-first",
             "reasoning_effort": "high", "fast_mode": "on",
+            "shell": "bash", "icon": "E", "env_vars": {"QA_AGENT": "  exact = value  ", "QA_EMPTY": ""},
         }])
         self.assertIs(create_calls[0][0], resolved_launch)
         self.assertIn(
@@ -865,6 +867,7 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
             {
                 "name": "Productmind",
                 "group": "torque",
+                "shell": "bash", "icon": "A", "env_vars": {"QA_AGENT": "  exact = value  ", "QA_EMPTY": ""},
                 "agent_settings": {
                     "boot_command": "codex architect",
                     "provider": "codex",
@@ -884,6 +887,7 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(resolver_calls, [{
             "command": "codex architect", "provider": "codex",
             "reasoning_effort": "xhigh",
+            "shell": "bash", "icon": "A", "env_vars": {"QA_AGENT": "  exact = value  ", "QA_EMPTY": ""},
         }])
         self.assertIs(create_calls[0][0], resolved_launch)
         stored = state.get_agent_settings("arch-created")

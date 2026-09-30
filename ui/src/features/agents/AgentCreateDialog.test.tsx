@@ -70,6 +70,26 @@ describe('agent creation', () => {
     expect(screen.getByText('The Engineer is created after approval in Planning.')).toBeVisible(); fireEvent.click(screen.getByRole('button', { name: 'Request hire' }));
     await waitFor(() => expect(close).toHaveBeenCalledOnce()); expect(last).toMatchObject({ cmd: 'architect_engineer_hire', architect_id: 'arch', specializations: ['frontend', 'ui-ux'] }); expect(created).not.toHaveBeenCalled();
   });
+  it.each(['worker', 'engineer', 'architect', 'terminal'] as const)('limits startup arguments and initialization controls to terminals when creating %s', async (kind) => {
+    vi.stubGlobal('fetch', mockFetch(() => Promise.resolve(rendered())));
+    setup(kind); await ready();
+    for (const label of ['Command arguments', 'Initialization script']) {
+      if (kind === 'terminal') expect(screen.getByLabelText(label)).toBeVisible();
+      else expect(screen.queryByLabelText(label)).not.toBeInTheDocument();
+    }
+    if (kind === 'terminal') expect(screen.queryByLabelText('Icon')).not.toBeInTheDocument();
+    else expect(screen.getByLabelText('Icon')).toBeVisible();
+  });
+  it('does not submit hidden terminal startup drafts after switching to a principal', async () => {
+    let submitted: TorqueCommand | undefined;
+    vi.stubGlobal('fetch', mockFetch((_url, options) => { submitted = commandFrom(options); return Promise.resolve(response({ id: 'engineer', kind: 'engineer', name: 'Principal' })); }));
+    const { close } = setup('terminal'); await ready();
+    fireEvent.change(screen.getByLabelText('Command arguments'), { target: { value: '--terminal-only' } });
+    fireEvent.change(screen.getByLabelText('Initialization script'), { target: { value: '/tmp/terminal-only.sh' } });
+    fireEvent.change(screen.getByLabelText('Agent kind'), { target: { value: 'engineer' } }); await ready();
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Principal' } }); fireEvent.click(screen.getByRole('button', { name: 'Create engineer' }));
+    await waitFor(() => expect(close).toHaveBeenCalledOnce()); expect(submitted).not.toHaveProperty('command_args'); expect(submitted).not.toHaveProperty('init_script');
+  });
   it('requests worker defaults and submits the reviewed raw launch values without constructing command flags', async () => {
     const calls: TorqueCommand[] = [];
     vi.stubGlobal('fetch', mockFetch((_url, options) => {

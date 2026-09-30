@@ -243,8 +243,6 @@ export function AgentCreateDialog({
     if (directory.trim()) payload.directory = directory.trim();
     if (shell) payload.shell = shell;
     if (icon.trim()) payload.icon = icon.trim();
-    if (commandArgs.trim()) payload.command_args = commandArgs.trim();
-    if (initScript.trim()) payload.init_script = initScript.trim();
     const env = parseEnvironment(environment);
     if (Object.keys(env).length) payload.env_vars = env;
     if (kind === 'engineer') payload.specializations = csv(specializations);
@@ -289,7 +287,7 @@ export function AgentCreateDialog({
           {kind === 'worker' ? <label>Role / template<select value={template} onChange={(event) => setTemplate(event.target.value)}><option value="">Group default</option>{template && !roleOptions.some((item) => item.id === template) ? <option value={template} disabled>Unavailable: {template}</option> : null}{roleOptions.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label> : null}
           {kind === 'engineer' && architects.length ? <label>Hiring Architect<select value={hiringArchitectId} onChange={(event) => setHiringArchitectId(event.target.value)}><option value="">User-owned Engineer</option>{architects.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label> : null}
           {kind === 'terminal' ? <label>Parent agent<select value={parentId} onChange={(event) => setParentId(event.target.value)}><option value="">Unattached</option>{parents.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label> : null}
-          <label>Icon<input value={icon} onChange={(event) => setIcon(event.target.value)} placeholder="optional icon" /></label>
+          {kind !== 'terminal' ? <label>Icon<input value={icon} onChange={(event) => setIcon(event.target.value)} placeholder="optional icon" /></label> : null}
         </div>
       </section>
 
@@ -313,11 +311,11 @@ export function AgentCreateDialog({
           {kind !== 'terminal' ? <label>Reasoning effort<input value={reasoningEffort} onChange={(event) => setReasoningEffort(event.target.value)} placeholder="inherit" /></label> : null}
           {kind !== 'terminal' ? <label>Fast mode<select value={fastMode} onChange={(event) => setFastMode(event.target.value)}><option value="inherit">Inherited</option><option value="on">On</option><option value="off">Off</option></select></label> : null}
           <label>Directory<input value={directory} onChange={(event) => setDirectory(event.target.value)} placeholder="group default" /></label>
-          <label>Shell<select value={shell} onChange={(event) => setShell(event.target.value)}><option value="">System default</option><option value="zsh">zsh</option><option value="bash">bash</option><option value="fish">fish</option></select></label>
-          <label>Command arguments<input value={commandArgs} onChange={(event) => setCommandArgs(event.target.value)} /></label>
+          <label>Shell<select value={shell} onChange={(event) => setShell(event.target.value)}><option value="">Inherit defaults</option><option value="zsh">zsh</option><option value="bash">bash</option><option value="fish">fish</option></select></label>
+          {kind === 'terminal' ? <label>Command arguments<input value={commandArgs} onChange={(event) => setCommandArgs(event.target.value)} /></label> : null}
         </div>
         <label>Environment variables<textarea value={environment} onChange={(event) => setEnvironment(event.target.value)} rows={3} placeholder={'KEY=value\nOTHER=value'} /></label>
-        <label>Initialization script<textarea value={initScript} onChange={(event) => setInitScript(event.target.value)} rows={3} /></label>
+        {kind === 'terminal' ? <label>Initialization script<textarea value={initScript} onChange={(event) => setInitScript(event.target.value)} rows={3} /></label> : null}
       </section> : null}
 
       {principal && !(kind === 'engineer' && hiringArchitectId) ? <section>

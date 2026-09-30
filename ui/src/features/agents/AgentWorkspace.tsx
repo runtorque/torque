@@ -80,6 +80,7 @@ interface AgentTreeRowProps {
 
 function AgentTreeRow({ row, selected, focused, taskTitle, collapsed, onToggle, onSelect, onActivate, onFocus, onRestart, onRelaunch, onClearContext, onInspectWorktree, onOrganize, onCopyId, onCopyName, onRemove }: AgentTreeRowProps) {
   const { agent } = row;
+  const icon = typeof agent.raw.icon === 'string' ? agent.raw.icon.trim() : '';
   return (
     <div
       role="treeitem"
@@ -99,7 +100,7 @@ function AgentTreeRow({ row, selected, focused, taskTitle, collapsed, onToggle, 
       {row.childCount ? <button className={styles.treeToggle} type="button" aria-label={`${collapsed ? 'Expand' : 'Collapse'} ${agent.name}`} onClick={(event) => { event.stopPropagation(); onToggle(); }}>{collapsed ? '›' : '⌄'}</button> : <span className={styles.treeToggleSpacer} />}
       <span className={`${styles.statusDot} ${styles[`tone_${statusTone(agent)}`] ?? ''}`} />
       <div className={styles.treeIdentity}>
-        <span><strong>{agent.name}</strong>{row.orphaned ? <small className={styles.orphanBadge}>missing owner</small> : null}</span>
+        <span>{icon ? <span className={styles.agentIcon} aria-hidden="true">{icon}</span> : null}<strong>{agent.name}</strong>{row.orphaned ? <small className={styles.orphanBadge}>missing owner</small> : null}</span>
         <small>{agent.kind}{agent.role ? ` · ${agent.role}` : agent.provider ? ` · ${agent.provider}` : ''} · {agentStatusLabel(agent)}</small>
       </div>
       <div className={styles.treeMeta}>
