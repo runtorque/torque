@@ -3880,3 +3880,12 @@ D-217 clarification (2026-09-30): arbitrary map values, including environment va
 - Show separate command-argument and initialization-script controls only for terminals, matching Classic's terminal-only startup contract. Agent operators can include arguments in Boot command. Hidden terminal drafts must not be sent after switching to an agent kind. Show the icon control only for agents: terminal creation does not support an icon override. These controls were previously visible without consumers; no supported Classic workflow is retired.
 - Render a saved custom icon beside the ownership-row name while retaining its independent status dot. Treat the icon as decorative for accessibility; updates and clearing preserve row identity and selection.
 - Preserve sparse untouched principal defaults and per-agent settings precedence. Verify actual shell, environment and directory from a local process; resolved model/reasoning/fast-mode values do not by themselves prove provider inference or service-tier behavior when a custom command is used.
+
+
+### D-224 — Inherit the group lane for general task creation
+
+- Date: 2026-09-30
+- Scope: general Board task creation and P-378; Group Settings P-088.
+- Start the general New task dialog at Group default. Send an empty lane until the operator chooses a lane, so the existing server resolves the saved group default and its normal fallback. Classic's general task modal follows this contract.
+- Keep explicit lane selection stable across snapshots, reconnect and refused creation. Inline creation within a Board lane continues to submit that lane explicitly. Initiative task creation continues to inherit the group default.
+- Keep label/action inheritance and explicit overrides under the existing backend contract. This repairs the general dialog's unintended first-lane override; no backend mutation or default-resolution semantics change.

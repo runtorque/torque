@@ -292,3 +292,29 @@ Run `workspace-navigation-recovery-live.spec.ts` alongside `workspace-navigation
 ### Native window restoration QA
 
 From a graphical desktop session, run `cargo run --offline --manifest-path src-tauri/Cargo.toml --example window_restore_qa` for an isolated native geometry check. It creates and destroys blank windows with a separate application identifier; it does not start or connect to a Torque daemon. It checks main and detached sizing policies, physical/legacy captures, offscreen and oversized recovery, then serialized bounds after window recreation. The command prints requested and observed geometry and exits nonzero on failure. Pure multi-monitor/negative-origin/mixed-scale cases run in the normal Rust suite. This smoke test does not replace physical cross-monitor, sleep/crash, or other-platform acceptance.
+
+
+### Group runtime policy and Board default regressions
+
+After the production UI build, run against a disposable PTY-enabled daemon with
+TORQUE_PROFILE_ENABLED=1. The runtime-policy test requires an explicit local
+Python executable and the opt-in below:
+
+```bash
+TORQUE_UI_BASE_URL=http://127.0.0.1:19085 TORQUE_PLAYWRIGHT_CHANNEL=chrome TORQUE_RUNTIME_POLICY_QA=1 TORQUE_PTY_PYTHON=/absolute/path/to/python npm --prefix ui run test:e2e -- settings-runtime-policy-live.spec.ts settings-board-defaults-live.spec.ts
+```
+
+The policy file saves and reloads the group settings, checks both behavior
+approval routes, waits for the real one-minute idle threshold, and exercises
+session resume through the actual provider launch wrapper. Its temporary local
+executable only records resume/session arguments; it never invokes a provider
+service or records generated configuration. Allow about two minutes for the
+health-loop case. All agents and temporary recorder files are removed afterward.
+
+The Board-default file checks actual task lane, label and action inheritance,
+explicit choices through reconnect/refusal, and fallback after clearing settings.
+It uses a temporary project action and removes its tasks/files afterward. Neither
+file modifies the default daemon; review and stop only the identity-verified QA
+runtime and its own sidecars. Proposal/group records remain in that disposable
+profile. These tests do not certify external provider conversation restoration,
+commercial inference or native window recovery.

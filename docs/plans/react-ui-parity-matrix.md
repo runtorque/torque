@@ -397,6 +397,7 @@ Sources below are relative to `static/js/`; React owners are under `ui/src/`. Al
 | P-375 | Principal creation: explicit shell override | Required | Classic advanced launch shell contract; backend principal resolver supports shell | AgentCreateDialog; principal launch input mapping; D-223 | Save kind/group shell defaults, choose another shell at creation and verify the actual process uses it for both Engineer and Architect; empty choice inherits defaults. |
 | P-376 | Principal creation: explicit icon override | Required | Classic agent icon choice; persisted AgentCell icon | AgentCreateDialog; principal launch input mapping; D-223 | Choose an Engineer/Architect icon, create and verify the persisted record and rendered ownership entry retain it. |
 | P-377 | Creation: kind-appropriate startup controls | Required | `modals/add-cell.js::setAddCellMode/submitAdd` shows arguments/init only for terminals and icon only for agents | AgentCreateDialog; D-223 | Terminal arguments/init remain available and functional; other kinds omit unsupported controls and hidden terminal drafts; terminals omit unsupported icon input. |
+| P-378 | Board: general task creation inherits saved group lane | Required | `modals/task-modal.js::openAddTask` leaves general creation lane empty; `commands/board_operations.py` resolves defaults | TaskCreateDialog; D-224 | General New task honors the saved lane; explicit choices survive reconnect/refusal; clearing defaults restores fallback. Verify real task lane, labels and action. |
 
 ## Command inventory
 
@@ -2668,3 +2669,33 @@ Final production-browser acceptance passed **10/10 scenarios in 2.1 minutes**, i
 The isolated QA profiles on ports 19082, 19083 and 19084 were cleaned with zero PTYs; their exact daemon/sidecar PIDs exited and the ports were released. Final identity is recorded in /private/tmp/principal-acceptance-runtime-final-20260930.json. Documentation contracts and diff checks passed. The full browser inventory is **177 tests / 113 files**; this checkpoint ran the ten relevant scenarios, not the complete browser or native suites.
 
 Ledger: **377 mapped / 370 implemented or equivalent / three broad open / four intentional retirements**. Remaining broad rows are P-087 Global Settings, P-088 Group Settings and P-112 lazy/reconnect recovery. Group session-resume, idle-timeout and behavior-approval effects, independent inventory/full-browser/native acceptance, Phase 4 and Classic retirement remain outside this completed principal-default acceptance.
+
+
+### Group runtime-policy acceptance and Board default-lane repair (2026-09-30)
+
+The three previously unverified P-088 runtime controls now have direct acceptance in settings-runtime-policy-live.spec.ts:
+
+| Field | Evidence |
+| --- | --- |
+| agent_session_resume | Save/reload false, true, false; actual local Codex-adapter launch wrapper invokes a recorder with no resume arguments, the retained provider session, then no resume arguments. Real remove/restore and React Relaunch are used; no provider service is contacted. |
+| agent_idle_timeout | Save/reload 0 and 1, reconnect draft/focus retention, actual running generic PTYs and ingested progress. The real 30-second health loop flags the one-minute agent; the older zero-timeout agent remains unflagged. React ownership rows show the corresponding attention states. |
+| engineer_behavior_requires_user_approval | Save/reload both values, Engineer-authored proposals and Architect endorsement. False applies directly; true preserves current behavior until reviewed user approval. Flipping the setting after proposal creation does not rewrite its persisted approval route. |
+
+Initial browser fixtures attempted no-op saves of default values; Save was correctly disabled. Fixtures now start from opposite values and retain their behavioral assertions. Final production-browser policy/bounds/compatibility/reconnect batch passed 7/7 in 1.8 minutes (/private/tmp/runtime-policy-final-20260930.log). The prior full UI gate passed 112 files / 1,045 tests plus lint/typecheck/build verification. Focused backend approval/events/PTY coverage passed 111 tests in 8.7 seconds (/private/tmp/runtime-policy-backend-20260930.log). Actual recorder and health JSON plus the attention screenshot were inspected. This does not certify commercial-provider conversation restoration.
+
+The next field audit found P-378: general New task initialized its lane to the first visible lane, overriding the saved group default. Classic submits an empty lane for that entry point. A focused component regression failed with Backlog instead of inheritance; explicit-choice recovery remained passing. D-224 restores inheritance; the accompanying live scenario checks saved lane/labels/action, explicit overrides through reconnect/refusal, and clearing. Full post-repair acceptance is pending. Pending ledger: 378 mapped / 370 implemented or equivalent / four open / four intentional retirements.
+
+
+### Group runtime policies and Board defaults accepted (2026-09-30)
+
+P-378/D-224 is accepted. The new component regression and live pre-fix browser scenario both reproduced forced Backlog instead of group inheritance (/private/tmp/board-default-lane-red-20260930.log and /private/tmp/board-default-browser-red-20260930.log). After the repair, all 15 focused task-creation/recovery tests pass. The existing App-level expectation was also updated from forced Backlog to the inherited empty lane; its focused check passed.
+
+Final make ui-check passed lint, typecheck, 112 files / 1,047 tests, build and bundle verification (/private/tmp/group-policy-board-ui-check-final-20260930.log). The earlier full run caught that obsolete App expectation; all other 1,046 tests passed. Final browser-test lint/typecheck passed after correcting a fixture lane from unavailable In Review to the QA daemon's existing To Do. That refusal was a test-data error, not a product relaxation.
+
+Final Board/browser acceptance passed 3/3 in 11.4 seconds (/private/tmp/board-default-browser-verified-20260930.log), covering saved default lane/labels/action, explicit lane/label choices through reconnect and refusal, clearing defaults, task dependencies/verification/evidence cleanup and authoring preview/external-reference behavior. The preceding rebuilt-browser batch passed the other six scenarios, including all three runtime-policy checks and Settings recovery, but its new Board case failed on the invalid fixture; it is not recorded as an all-green batch (/private/tmp/group-policy-board-final-20260930.log). The independently frozen policy/bounds/compatibility/reconnect batch passed 7/7 before the Board repair. Actual task JSON and the final lane screenshot were inspected.
+
+Focused backend approval/events/PTY checks passed 111 tests. No backend or protocol implementation changed, so full make test was not repeated. The full browser/native suites were not rerun. Current browser inventory is 181 tests / 115 files (/private/tmp/group-policy-browser-inventory-20260930.txt).
+
+The QA profile react-runtime-policy-20260930 on port 19085 ended with zero PTYs. Exact daemon/ingest/supervisor PIDs 76899/76913/76914 exited; absence and port release were verified. Identity is retained in /private/tmp/group-policy-runtime-final-20260930.json. The default daemon was untouched.
+
+Ledger: **378 mapped / 371 implemented or equivalent / three broad open / four intentional retirements**. P-087 Global Settings, P-088 Group Settings and P-112 consolidated lazy/reconnect recovery remain open. The six group fields verified here are session resume, idle timeout, behavior approval, Board default lane, Board default labels and Board default action. Remaining field-by-field reconciliation and independent inventory/full-browser/native acceptance still block Phase 4 and Classic retirement.

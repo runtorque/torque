@@ -318,6 +318,7 @@ describe('workspace shell', () => {
     })); });
     fireEvent.click(screen.getByRole('button', { name: '＋ New task' }));
     expect(screen.getByRole('dialog', { name: 'Create task' })).toBeVisible();
+    expect(screen.getByRole('combobox', { name: 'Lane' })).toHaveValue('');
     expect(await within(screen.getByRole('combobox', { name: 'Action' })).findAllByRole('option', { name: 'feature/implement' })).toHaveLength(1);
     fireEvent.change(screen.getByRole('textbox', { name: 'Title' }), {
       target: { value: 'Ship Phase 2' },
@@ -335,7 +336,7 @@ describe('workspace shell', () => {
       cmd: 'board_add_task',
       task: 'Ship Phase 2',
       group: 'Foundation',
-      lane: 'Backlog',
+      lane: '',
       description: '',
       labels: [],
       action_name: '',

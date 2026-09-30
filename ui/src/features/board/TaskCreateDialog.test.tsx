@@ -7,9 +7,9 @@ import type { TorqueCommand } from '../../protocol';
 import { TaskCreateDialog } from './TaskCreateDialog';
 
 afterEach(() => vi.unstubAllGlobals());
-function setup(actions: unknown = [], defaultAction = '') {
+function setup(actions: unknown = [], defaultAction = '', defaultLane = '') {
   const store = createAppStore();
-  store.dispatch(projectionActions.snapshotReceived({ ...compactStateFixture, group_settings: { Foundation: { board_default_action: defaultAction } }, board_tasks: { prerequisite: { id: 'prerequisite', task: 'Cross-group prerequisite', group: 'Other', lane: 'Backlog' } } }));
+  store.dispatch(projectionActions.snapshotReceived({ ...compactStateFixture, group_settings: { Foundation: { board_default_action: defaultAction, board_default_lane: defaultLane } }, board_tasks: { prerequisite: { id: 'prerequisite', task: 'Cross-group prerequisite', group: 'Other', lane: 'Backlog' } } }));
   const calls: TorqueCommand[] = []; const uploads: string[] = []; const cleanups: string[] = []; let fail = '';
   const onClose = vi.fn();
   vi.stubGlobal('fetch', vi.fn((url: string, options: RequestInit) => {
@@ -24,11 +24,34 @@ function setup(actions: unknown = [], defaultAction = '') {
     if (cmd.cmd === 'preview_prompt' && !fail) return response({ ok: true, data: { type: 'prompt_preview', prompt: 'Rendered unsaved prompt', warning: 'Preview warning' } });
     return response(fail === cmd.cmd ? { ok: false, creation_refused: true, error: 'Write rejected' } : { ok: true, data: { type: cmd.cmd === 'board_add_task' ? 'board_task_added' : 'state', task_id: 'created', title: cmd.task, seq: 10, board_tasks: {} } });
   }));
-  const view = (catalog: unknown) => <Provider store={store}><TaskCreateDialog group="Foundation" lanes={['Backlog']} actions={catalog} roles={[]} onClose={onClose} /></Provider>;
+  const view = (catalog: unknown) => <Provider store={store}><TaskCreateDialog group="Foundation" lanes={['Backlog', 'In Review']} actions={catalog} roles={[]} onClose={onClose} /></Provider>;
   const rendered = render(view(actions));
   return { calls, uploads, cleanups, onClose, store, refresh: (catalog: unknown) => rendered.rerender(view(catalog)), fail: (cmd: string) => { fail = cmd; } };
 }
 describe('reviewed task creation', () => {
+  it('inherits the saved group lane instead of silently submitting the first lane', async () => {
+    const { calls, onClose, store } = setup([], '', 'In Review');
+    const lane = screen.getByLabelText('Lane');
+    expect(lane).toHaveValue('');
+    fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Use group default' } });
+    lane.focus();
+    act(() => { store.dispatch(projectionActions.snapshotReceived({ ...compactStateFixture, group_settings: { Foundation: { board_default_lane: 'Backlog' } } })); });
+    expect(screen.getByLabelText('Lane')).toBe(lane); expect(lane).toHaveFocus(); expect(lane).toHaveValue('');
+    fireEvent.click(screen.getByRole('button', { name: 'Create task' }));
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+    expect(calls.at(-1)).toMatchObject({ cmd: 'board_add_task', lane: '' });
+  });
+  it('retains an explicit lane across refreshed defaults and refused creation', async () => {
+    const { calls, onClose, store, fail } = setup([], '', 'In Review');
+    fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Explicit lane' } });
+    fireEvent.change(screen.getByLabelText('Lane'), { target: { value: 'Backlog' } });
+    act(() => { store.dispatch(projectionActions.snapshotReceived({ ...compactStateFixture, group_settings: { Foundation: { board_default_lane: 'In Review' } } })); });
+    fail('board_add_task'); fireEvent.click(screen.getByRole('button', { name: 'Create task' }));
+    await screen.findByText('Write rejected'); expect(screen.getByLabelText('Lane')).toHaveValue('Backlog');
+    fail(''); fireEvent.click(screen.getByRole('button', { name: 'Create task' }));
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+    expect(calls.filter((call) => call.cmd === 'board_add_task').map((call) => call.lane)).toEqual(['Backlog', 'Backlog']);
+  });
   it('uses named defaults, isolates action drafts and retains focus and explicit values across catalog and state refreshes', async () => {
     const actions = [{ name: 'build', vars: [{ name: 'TASK' }, { name: 'SCOPE', default: 'all' }, { name: 'COUNT', default: 0 }, { name: 'ENABLED', default: false }] }, { name: 'review', vars: [{ name: 'SCOPE', default: 'review' }] }];
     const { calls, refresh, store, onClose } = setup(actions, 'build');

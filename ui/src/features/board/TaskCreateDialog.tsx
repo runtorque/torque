@@ -32,7 +32,7 @@ export function TaskCreateDialog({ group, lanes, actions, roles, onClose, initia
   const { records: taskRecords } = useAppSelector(selectTasksState);
   const [title, setTitle] = useState(initialValues?.title ?? '');
   const [description, setDescription] = useState(initialValues?.description ?? '');
-  const [lane, setLane] = useState(initialValues ? '' : lanes[0] ?? '');
+  const [lane, setLane] = useState('');
   const [labels, setLabels] = useState('');
   const [actionName, setActionName] = useState(''); const [role, setRole] = useState('');
   const [scheduledAt, setScheduledAt] = useState('');
