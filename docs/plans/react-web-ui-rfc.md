@@ -1626,3 +1626,8 @@ P-408/P-409/D-240 restore Classic quick-verification eligibility and reconcile l
 ### Scoped deployment-status acceptance
 
 P-410/D-241 restores the actual pending-deploy count, task details, scoped polling, error/retry behavior and Board shortcut. The UI gate passes 123 files / 1,122 tests; deployment browser acceptance passes with actual reconnect and read deadlines alongside three adjacent passing scenarios. Six additional footer differences have been reproduced and remain next repair work; Phase 4 stays open. No deployment or daemon restart was performed.
+
+
+### Workspace status acceptance
+
+P-411–P-416/D-242 restore operational workload/task/attention counts and navigation, account quota windows, live metrics and supervisor status. The UI gate passes 125 files / 1,130 tests; all four scoped browser scenarios pass, with retained drafts/caret and narrow-window keyboard access. Ledger: 416 mapped / 412 accepted / no recorded open repairs / four intentional retirements. This does not close Phase 4: current native handoff and the full 219-case browser suite remain pending, alongside the final evidence reconciliation.

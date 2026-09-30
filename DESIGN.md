@@ -4021,3 +4021,10 @@ Clear context uses a custom confirmation in browser and desktop, matching Classi
 ### D-241 — Scoped deployment status
 
 The deployment status uses the daemon's `pending_deploy` count and task IDs. A pending count is a keyboard-accessible Board shortcut; a failed check is a visible retry action with its reason, while zero pending tasks hides the chip. Read the selected group's state on connect, group change and return to a visible document, and every 90 seconds while visible. Hidden/disabled/disconnected surfaces stop polling. Each read owns a 15-second deadline and cancellation scope; late or wrong-group responses cannot replace current evidence. Opening the shortcut refreshes evidence without deploying or restarting anything.
+
+
+### D-242 — Status indicators retain operational meaning
+
+Workspace status follows Classic's data definitions: workload excludes terminals and deleted/dismissed cells, distinguishes running/starting, idle and errors; active tasks are assigned and neither closed nor archived/deleted. Attention counts the same scoped undismissed asks and agent alerts as Events, independently of Inbox unread totals, and opens Activity. Task counts open Board. Shared dismissal timestamps keep the footer and Events consistent.
+
+Provider indicators select one freshest available agent report per provider across groups because 5h/weekly quotas are account-wide. They show used percentages, remaining/reset/source details, unknown values and warning thresholds without summing reports. Health shows live lag/memory with CPU/frontend details and opens Mission Control's Health surface. Daemon visibility also controls the passive supervisor health indicator. Metrics have a dedicated subscription in a small component; stable chips retain focus, and the footer scrolls horizontally when all indicators cannot fit. Settings preview uses matching sample labels and includes supervisor status.

@@ -113,4 +113,8 @@
 .agentWorkspaceHost { display: flex; flex: 1; min-height: 0; overflow: hidden; }
 .agentWorkspaceHost[hidden] { display: none; }
 
-.statusBar button[data-tone='danger'] { color: var(--danger); }
+.statusBar [data-tone='danger'] { color: var(--danger); }
+.statusBar [data-tone='warning'] { color: var(--warning); }
+.statusBar { overflow-x: auto; justify-content: flex-start; }
+.statusBar > * { flex-shrink: 0; }
+.statusBar > :first-child { margin-left: auto; }

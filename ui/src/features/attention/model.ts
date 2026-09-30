@@ -21,3 +21,12 @@ export function askTarget(task: UnknownRecord, tasks: UnknownRecord, agents: Unk
     : !['idle', 'running'].includes(text(agent.status)) ? 'The reply session is not active.' : '';
   return { id, agent, reason, answerable: !reason };
 }
+
+export function attentionTimestamp(item: UnknownRecord, task: boolean): number {
+  const stamp = task ? Date.parse(text(item.created_at)) / 1000 : Number(item.last_event_at);
+  return Number.isFinite(stamp) && stamp > 0 ? stamp : 0;
+}
+export function attentionDismissed(dismissed: UnknownRecord, id: string, stamp: number): boolean {
+  const saved = Number(dismissed[id]);
+  return Number.isFinite(saved) && saved > 0 && (!stamp || stamp <= saved);
+}

@@ -1,4 +1,4 @@
-import { DeployStatus } from './DeployStatus';
+import { WorkspaceStatus } from './WorkspaceStatus';
 import { CommandConfirmation, type ConfirmedCommand } from './CommandConfirmation';
 import { SettingsNavigationProvider } from './SettingsNavigationGuard';
 import { useSettingsNavigation } from './settingsNavigation';
@@ -9,8 +9,6 @@ import { Provider } from 'react-redux';
 import { Dialog, DialogTrigger, Heading, Popover } from 'react-aria-components';
 
 import { ActionMenu, ActionMenuItem, Button, ModalDialog, StateSurface } from '../design/primitives';
-import { RelayStatusIndicator } from '../features/relay/RelayStatus';
-import { statusVisibilityEnabled } from '../features/relay/relayStatusModel';
 import { extensionRegistry } from '../extensions';
 import { BoardPanel, type CommandSender } from '../features/board/BoardPanel';
 import { AgentWorkspace } from '../features/agents/AgentWorkspace';
@@ -19,13 +17,11 @@ import { TorqueProtocolClient, type TorqueCommand } from '../protocol';
 import { useAppDispatch, useAppSelector } from './hooks';
 import {
   createAppStore,
-  selectAgentsState,
   selectConnection,
   selectGroupsState,
   selectNoticesState,
   selectOperationsState,
   selectRuntime,
-  selectTasksState,
   selectWorkspaceState,
   selectWorkspaceUi,
   workspaceUiActions,
@@ -164,8 +160,6 @@ function WorkspaceShellContent({ host, sendCommand }: WorkspaceShellProps) {
   const dispatch = useAppDispatch();
   const connection = useAppSelector(selectConnection);
   const runtime = useAppSelector(selectRuntime);
-  const agentsState = useAppSelector(selectAgentsState);
-  const tasksState = useAppSelector(selectTasksState);
   const operations = useAppSelector(selectOperationsState);
   const { records: groups } = useAppSelector(selectGroupsState);
   const notices = useAppSelector(selectNoticesState);
@@ -224,16 +218,7 @@ function WorkspaceShellContent({ host, sendCommand }: WorkspaceShellProps) {
   const persistedSidebarWidth = Number(workspace.sidebarWidth ?? 0);
   const [sidebarWidth, setSidebarWidth] = useState(Number.isFinite(persistedSidebarWidth) && persistedSidebarWidth > 0 ? persistedSidebarWidth : 188);
   const globalSettings = operations.globalSettings;
-  const statusVisibility = {
-    daemon_status: false, claude_usage: false, codex_usage: false, deploy: true,
-    health: false, workload: false, tasks: true, attention: true,
-    ...asRecord(globalSettings.status_bar_visibility),
-  };
-  const groupAgents = Object.values(agentsState.records).map(asRecord).filter((agent) => agent.group === activeGroup && !Number(agent.deleted_at ?? 0));
-  const groupTasks = Object.values(tasksState.records).map(asRecord).filter((task) => task.group === activeGroup && task.lane !== 'Archived');
-  const runningAgents = groupAgents.filter((agent) => ['running', 'working', 'busy'].includes(textValue(agent.status))).length;
-  const attentionCount = groupAgents.filter((agent) => agent.needs_attention === true || textValue(agent.health_state) === 'blocked').length + unread;
-  const healthState = textValue(operations.health.status, textValue(operations.health.overall_status, 'unknown'));
+
 
   const pushToast = useCallback((message: string, level: ToastMessage['level'] = 'info') => {
     const id = ++toastSequence.current;
@@ -599,17 +584,7 @@ function WorkspaceShellContent({ host, sendCommand }: WorkspaceShellProps) {
         {retainedGroup && textValue(activeDetachedWindow.label) ? <div role="status">Settings remain in this window while another Control Center window is open.</div> : null}
         {retainedGroup && retainedGroup !== activeGroup ? <div role="status">Settings for {retainedGroup} remain open. <Button onPress={() => requestNavigation(() => {})}>Switch to {activeGroup}</Button></div> : null}
         {workspaceUi.activePanel === 'control' && !activeDetachedLabel ? <Suspense fallback={<StateSurface title="Loading Control Center" description="Preparing operational resources." />}><ControlCenter host={host} key={controlGroup} group={controlGroup} sendCommand={sendCommand} onCommandUnavailable={commandUnavailable} /></Suspense> : null}
-        <footer className={styles.statusBar} aria-label="Workspace status">
-          {statusVisibilityEnabled(statusVisibility.daemon_status) ? <span data-state={connection.status}>● Daemon {connection.status}</span> : null}
-          <RelayStatusIndicator connection={operations.relayConnection} visible={statusVisibility.daemon_status} />
-          <DeployStatus group={activeGroup} enabled={statusVisibilityEnabled(statusVisibility.deploy)} ready={connection.status === 'connected' && connection.expectedSeq !== null && !connection.awaitingResync} reconnect={connection.reconnectCount} onOpen={() => navigatePanel('board')} />
-          {statusVisibility.health ? <span>Health {healthState}</span> : null}
-          {statusVisibility.workload ? <span>Agents {runningAgents} run · {groupAgents.length} total</span> : null}
-          {statusVisibility.tasks ? <span>Tasks {groupTasks.filter((task) => task.lane !== 'Done').length} active</span> : null}
-          {statusVisibility.attention ? <button onClick={() => navigatePanel('control', 'mission')}>Attention {attentionCount}</button> : null}
-          {statusVisibility.claude_usage ? <span>Claude {textValue(asRecord(operations.health.claude_usage).percent, '—')}%</span> : null}
-          {statusVisibility.codex_usage ? <span>Codex {textValue(asRecord(operations.health.codex_usage).percent, '—')}%</span> : null}
-        </footer>
+        <WorkspaceStatus group={activeGroup} onBoard={() => navigatePanel('board')} onEvents={() => navigatePanel('control', 'activity')} onHealth={() => navigatePanel('control', 'mission')} />
       </section>
 
       <ModalDialog title={workspaceUi.commandPaletteScope === 'groups' ? 'Group navigator' : workspaceUi.commandPaletteScope === 'panels' ? 'Panel navigator' : 'Command palette'} description="Jump to a workspace or run a common action." size="medium" isOpen={workspaceUi.commandPaletteOpen} onOpenChange={(open) => dispatch(workspaceUiActions.setCommandPaletteOpen(open))}>

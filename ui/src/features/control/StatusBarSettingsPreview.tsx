@@ -4,14 +4,15 @@ import styles from './ControlCenter.module.css';
 // do not subscribe to live resources or apply draft visibility to that footer.
 const indicators = [
   ['daemon_status', '● Daemon connected'],
+  ['daemon_status', 'Supervisor'],
   ['daemon_status', '● Relay connected'],
   ['deploy', 'Deploy +2'],
-  ['health', 'Health good'],
-  ['workload', 'Agents 3 run'],
+  ['health', 'Lag 2.0ms · Mem 128MB'],
+  ['workload', 'Agents 3 run / 1 idle'],
   ['tasks', 'Tasks 4 active'],
   ['attention', 'Attention 1'],
-  ['claude_usage', 'Claude 42%'],
-  ['codex_usage', 'Codex 20%'],
+  ['claude_usage', 'Claude 5h 42% · 7d 20%'],
+  ['codex_usage', 'Codex 5h 20% · 7d 10%'],
 ] as const;
 
 export function StatusBarSettingsPreview({ visibility }: { visibility: Record<string, unknown> }) {

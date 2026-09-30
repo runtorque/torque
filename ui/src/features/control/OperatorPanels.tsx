@@ -1,6 +1,6 @@
 import { MissionSummary } from '../mission/MissionSummary';
 import { AskResponse } from '../attention/AskResponse';
-import { isOpenAsk } from '../attention/model';
+import { attentionDismissed, attentionTimestamp, isOpenAsk } from '../attention/model';
 import { HealthDetails, SupervisorDetails } from './OperationalDetails';
 import { useAppSelector } from '../../app/hooks';
 import { selectRuntime, selectAgentsState, selectTasksState, selectEventDismissals } from '../../app/store';
@@ -34,15 +34,6 @@ export function MissionPanel({ group, agentCount, refreshVersion, health, superv
       <div className={styles.classConfirm}><p>{supervisorAction?.kind === 'terminate' ? 'This stops the selected live terminal session.' : 'This restarts the supervisor and may interrupt every managed live terminal session.'}</p><footer><Button tone="quiet" onPress={() => setSupervisorAction(null)}>Cancel</Button><Button tone="danger" onPress={() => { if (supervisorAction?.kind === 'terminate') send({ cmd: 'supervisor_session_terminate', session_id: supervisorAction.sessionId }); else if (supervisorAction?.kind === 'restart') send({ cmd: 'supervisor_restart' }); setSupervisorAction(null); }}>{supervisorAction?.kind === 'terminate' ? 'Terminate session' : 'Restart supervisor'}</Button></footer></div>
     </ModalDialog>
   </div>;
-}
-
-function attentionTimestamp(item: UnknownRecord, task: boolean): number {
-  const stamp = task ? Date.parse(text(item.created_at)) / 1000 : Number(item.last_event_at);
-  return Number.isFinite(stamp) && stamp > 0 ? stamp : 0;
-}
-function attentionDismissed(dismissed: UnknownRecord, id: string, stamp: number): boolean {
-  const saved = Number(dismissed[id]);
-  return Number.isFinite(saved) && saved > 0 && (!stamp || stamp <= saved);
 }
 
 export function ActivityPanel({ events, send, group = '' }: { events: UnknownRecord[]; group?: string; send: (command: TorqueCommand) => void }) {
