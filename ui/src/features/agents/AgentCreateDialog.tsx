@@ -150,7 +150,7 @@ export function AgentCreateDialog({
   useEffect(() => {
     if (!open || connection.status !== 'connected' || kind !== 'worker' || locked || resolvedRead.key === resolutionKey) return;
     const controller = new AbortController();
-    void settingsRequest({ cmd: 'render_template', group, name: template }, controller.signal, false, 'Launch settings').then((frame) => {
+    void settingsRequest({ cmd: 'render_template', group, name: template, kind: 'worker' }, controller.signal, false, 'Launch settings').then((frame) => {
       if (controller.signal.aborted || lockedRef.current) return;
       const next = resolvedLaunchDraft(validateTemplateResponse(frame, group, template));
       setLaunch((current) => Object.fromEntries(Object.entries(next).map(([key, value]) => [key, editedLaunch.current.has(key as keyof LaunchDraft) ? current[key as keyof LaunchDraft] : value])) as LaunchDraft);

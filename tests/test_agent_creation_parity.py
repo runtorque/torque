@@ -16,6 +16,7 @@ from torque.commands.agent_operations import AgentOperationRuntime, handle_agent
 from torque.commands.catalog import CatalogCommandRuntime, handle_catalog_command
 from torque.commands.agent_classes import _handle_agent_class_command
 from torque.roles import RoleManager
+from torque.server_agent import AgentLaunchService
 from torque.state import GroupSettings
 
 
@@ -60,6 +61,51 @@ class CreationParityTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(empty['config']['model'], 'group-model')
                 missing = await handle_catalog_command({'cmd': 'render_template', 'group': 'g', 'name': 'missing'}, runtime)
                 self.assertEqual(missing['type'], 'error')
+
+    async def test_worker_preview_resolves_kind_defaults_without_building_cli_flags(self):
+        settings = GroupSettings(
+            agent_provider='claude-code', agent_boot_command='/bin/cat shared',
+            agent_model='shared-model', agent_reasoning_effort='low', agent_fast_mode='on',
+            worker_provider='generic', worker_boot_command='/bin/cat worker',
+            worker_model='worker-model', worker_reasoning_effort='high', worker_fast_mode='off',
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            roles = Path(directory)
+            (roles / 'build.yaml').write_text('provider: codex\nmodel: role-model\nreasoning_effort: medium\nfast_mode: on\n')
+            manager = RoleManager()
+            with patch.object(manager, '_source_dirs', return_value=[(str(roles), False)]):
+                runtime = CatalogCommandRuntime(state=SimpleNamespace(get_group_settings=lambda group: settings), db=None, action_mgr=None, template_mgr=manager, specialization_mgr=None, resolve_base_dir=AsyncMock(return_value=directory), handle_set_engineer_specializations_command=None, action_to_yaml=None)
+                async def preview(**values):
+                    return (await handle_catalog_command({'cmd': 'render_template', 'group': 'g', 'name': '', 'kind': 'worker', **values}, runtime))['config']
+                resolved = await preview()
+                for key, value in {'provider': 'generic', 'command': '/bin/cat worker', 'model': 'worker-model', 'reasoning_effort': 'high', 'fast_mode': 'off'}.items():
+                    self.assertEqual(resolved[key], value, key)
+                role = await preview(name='build')
+                self.assertEqual(role['model'], 'worker-model')
+                self.assertEqual(role['fast_mode'], 'on')  # Role fast mode is explicitly more specific.
+                explicit = await preview(name='build', overrides={'model': ' explicit ', 'fast_mode': 'off', 'env_vars': {'SPACE': '  exact  '}})
+                self.assertEqual(explicit['model'], 'explicit')
+                self.assertEqual(explicit['fast_mode'], 'off')
+                self.assertEqual(explicit['env_vars'], {'SPACE': '  exact  '})
+                settings.worker_fast_mode = 'inherit'
+                self.assertEqual((await preview())['fast_mode'], 'on')
+                settings.worker_model = ''
+                self.assertEqual((await preview())['model'], 'shared-model')
+                self.assertEqual((await preview(name='build'))['model'], 'role-model')
+                service = AgentLaunchService(state=SimpleNamespace(get_group_settings=lambda group: settings, get_default_command=lambda: 'claude'), connection=None, bridge=None, worktree_mgr=None, template_mgr=manager)
+                # Preview remains raw; launch finalizes model/reasoning exactly once.
+                settings.agent_boot_command = settings.worker_boot_command = ''
+                settings.worker_provider = 'codex'
+                settings.worker_model = 'worker-model'
+                raw = await preview()
+                self.assertNotIn('--model', raw.get('command', ''))
+                launched = service.resolve_worker_launch_config('g')
+                self.assertEqual(launched['command'], 'codex --model worker-model -c model_reasoning_effort=high')
+                self.assertEqual(launched['fast_mode'], raw['fast_mode'])
+                settings.agent_boot_command = '/bin/cat shared'
+                generic = await preview(kind='')
+                self.assertEqual(generic['model'], 'shared-model')
+                self.assertEqual(generic['command'], '/bin/cat shared')
 
     async def test_class_discovery_resolves_group_and_keeps_explicit_path_compatibility(self):
         import json

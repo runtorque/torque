@@ -25,6 +25,7 @@ from .behavior_overlay import behavior_overlay_block_marker, split_behavior_over
 from .config import log
 from .deploy_state import record_session_runtime_provenance
 from .state import normalize_codex_fast_mode
+from .services.agent_launch_defaults import resolve_fast_mode, worker_launch_overrides
 from .terminal_adapter import (
     TerminalInputDeliveryError,
     TerminalInputUnavailableError,
@@ -361,14 +362,7 @@ class AgentLaunchService:
             index += 1
         return f"{base} {index}"
 
-    @staticmethod
-    def _resolve_fast_mode(*values) -> str:
-        """Resolve launch preference from most to least specific scope."""
-        for value in values:
-            mode = normalize_codex_fast_mode(value, strict=False)
-            if mode != "inherit":
-                return mode
-        return "inherit"
+    _resolve_fast_mode = staticmethod(resolve_fast_mode)
 
     def resolve_agent_launch_config(self, group: str, *,
                                     base_dir: str = "",
@@ -563,24 +557,8 @@ class AgentLaunchService:
                                      explicit_template: str = "",
                                      overrides: dict[str, Any] | None = None) -> dict:
         """Resolve launch config for worker agents in a group."""
-        merged = {}
         gs = self.state.get_group_settings(group)
-        if getattr(gs, "worker_provider", ""):
-            merged["provider"] = gs.worker_provider
-        if getattr(gs, "worker_boot_command", ""):
-            merged["command"] = gs.worker_boot_command
-        if getattr(gs, "worker_model", ""):
-            merged["model"] = gs.worker_model
-        if getattr(gs, "worker_reasoning_effort", ""):
-            merged["reasoning_effort"] = gs.worker_reasoning_effort
-        for key, value in (overrides or {}).items():
-            if isinstance(value, str):
-                value = value.strip()
-                if not value:
-                    continue
-            elif value is None:
-                continue
-            merged[key] = value
+        merged = worker_launch_overrides(gs, overrides)
         resolved = self.resolve_agent_launch_config(
             group,
             base_dir=base_dir,

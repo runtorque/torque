@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ..dispatch_registry import AsyncHandlerRegistry
+from ..services.agent_launch_defaults import resolve_fast_mode, worker_launch_overrides
 from .roles import ROLE_TEMPLATE_COMMAND_NAMES, _ROLE_TEMPLATE_COMMAND_REGISTRY
 from .action_authoring import ACTION_AUTHORING_COMMANDS, handle_action_authoring_command
 
@@ -310,8 +311,17 @@ async def handle_catalog_command(
         if name and not template_mgr.load_template(name, base_dir):
             return {"type": "error", "message": f'Role "{name}" not found'}
         gs = state.get_group_settings(group)
+        overrides = data.get("overrides", {})
+        worker = data.get("kind") == "worker"
+        if worker:
+            overrides = worker_launch_overrides(gs, overrides)
         rendered = template_mgr.resolve_agent_config(
-            name, gs, data.get("overrides", {}), base_dir=base_dir)
+            name, gs, overrides, base_dir=base_dir)
+        if worker:
+            rendered["fast_mode"] = resolve_fast_mode(
+                rendered.get("fast_mode"), getattr(gs, "worker_fast_mode", "inherit"),
+                getattr(gs, "agent_fast_mode", "inherit"),
+            )
         return {
             "type": "template_rendered", "group": group,
             "name": name, "config": rendered,

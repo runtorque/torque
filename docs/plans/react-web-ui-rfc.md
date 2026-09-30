@@ -1517,3 +1517,9 @@ Companion-terminal/settings audit (2026-09-30): four real process launches verif
 
 
 Companion-terminal and launch metadata acceptance (2026-09-30): four actual terminal processes verify directory precedence after Settings save/reload. Nine actual launches verify eleven saved profile/color/backend metadata fields, overrides and clearing, while preserving current PTY behavior. D-221 guidance is visible and accessible without removing stored metadata. Final validation passed 44 focused settings checks, 62 backend launch checks, the full 1,038-test UI gate and both production-browser scenarios. Screenshot/JSON evidence was inspected. No backend implementation changed; full backend/browser/native suites were not repeated. Ledger remains 373/365/four open/four retired, and broad field/lazy/reconnect acceptance remains incomplete.
+
+
+Worker launch defaults audit (2026-09-30): P-374/D-222 repairs New Worker's generic preview overriding saved worker-specific values. Shared resolver helpers keep raw preview and launch precedence aligned. Two regression failures were reproduced; final UI/backend and real-process browser acceptance remain pending. This does not close the broad settings/recovery gates.
+
+
+Worker launch defaults acceptance (2026-09-30): P-374/D-222 passed 65 focused backend checks, 35 creation/recovery checks, the full 1,039-test UI gate and full backend regression (**3,277 tests / 82 skips**). Final production-browser acceptance passed both scenarios: three actual worker command/default/override/fallback launches plus nine adjacent metadata launches. Shared raw preview and executable launch precedence now agree. The isolated QA daemon and sidecars were cleaned with zero PTYs. Ledger: **374 mapped / 366 implemented or equivalent / four broad open / four intentional retirements**. Full browser/native and broad field/recovery acceptance remain incomplete.

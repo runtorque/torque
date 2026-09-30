@@ -70,6 +70,21 @@ describe('agent creation', () => {
     expect(screen.getByText('The Engineer is created after approval in Planning.')).toBeVisible(); fireEvent.click(screen.getByRole('button', { name: 'Request hire' }));
     await waitFor(() => expect(close).toHaveBeenCalledOnce()); expect(last).toMatchObject({ cmd: 'architect_engineer_hire', architect_id: 'arch', specializations: ['frontend', 'ui-ux'] }); expect(created).not.toHaveBeenCalled();
   });
+  it('requests worker defaults and submits the reviewed raw launch values without constructing command flags', async () => {
+    const calls: TorqueCommand[] = [];
+    vi.stubGlobal('fetch', mockFetch((_url, options) => {
+      const command = commandFrom(options); calls.push(command);
+      return Promise.resolve(command.cmd === 'render_template' ? rendered('', { provider: 'generic', command: '/bin/cat worker', model: 'worker-model', reasoning_effort: 'high', fast_mode: 'off' }) : response({ id: 'worker', name: 'Worker defaults', kind: 'worker' }));
+    }));
+    const { close } = setup(); await ready();
+    expect(calls[0]).toMatchObject({ cmd: 'render_template', kind: 'worker', group: 'Foundation' });
+    expect(screen.getByLabelText('Boot command')).toHaveValue('/bin/cat worker');
+    expect(screen.getByLabelText('Model')).toHaveValue('worker-model');
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Worker defaults' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create worker' }));
+    await waitFor(() => expect(close).toHaveBeenCalledOnce());
+    expect(calls.at(-1)).toMatchObject({ command: '/bin/cat worker', model: 'worker-model', reasoning_effort: 'high', fast_mode: 'off' });
+  });
   it('loads resolved template fields, preserving explicit overrides across selection and reconnect', async () => {
     const calls: TorqueCommand[] = [];
     vi.stubGlobal('fetch', mockFetch((_url: string, options: RequestInit) => { const command = commandFrom(options); calls.push(command); return Promise.resolve(rendered(String(command.name), { provider: 'generic', command: '/bin/cat', model: command.name || 'group-model', shell: 'bash', env_vars: { MODE: 'qa' }, worktree: true, worktree_base_branch: 'main', worktree_merge_squash: false })); }));

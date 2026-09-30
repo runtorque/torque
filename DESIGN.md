@@ -3861,3 +3861,12 @@ D-217 clarification (2026-09-30): arbitrary map values, including environment va
 - Keep the stored profile/color fields editable and preserve their existing inheritance into launch records. Describe them as launch metadata: the current embedded terminal adapter does not apply terminal-emulator profiles, and embedded terminals/React do not apply tab colors. Do not promise an iTerm appearance change from Engineer defaults.
 - Label the stored default backend as a compatibility value: current operator launches explicitly use the embedded PTY backend. Editing this stored field does not switch terminal runtimes.
 - This is clarification of existing runtime capabilities, not retirement of a supported visual workflow. Classic's manual terminal defaults pane is already absent, while action/role metadata authoring remains available. `TerminalCapabilities` and `LocalPtyAdapter.capabilities` define the current support; launch resolution/persistence alone must not be counted as a visual-effect test.
+
+
+### D-222 — Preview worker-specific launch defaults using launch precedence
+
+- Date: 2026-09-30
+- Scope: New Worker, P-374; group worker launch defaults in P-088.
+- Request a worker-specific raw role preview. Share worker provider/command/model/reasoning override precedence with the executable launch resolver: worker defaults override role/shared values, and explicit launch edits override worker defaults. Preserve the existing distinct fast-mode order: explicit/role, worker, shared.
+- Keep preview commands raw; model/reasoning flags belong to backend launch finalization. Show the values that will be submitted, retain explicit edits on refresh/reconnect and freeze reviewed payloads for exact creation retries. Clearing stored worker defaults restores role/shared inheritance.
+- Keep generic role previews backward compatible for other consumers. This repairs a React request that previously promoted generic preview values into explicit overrides, bypassing worker-specific defaults.

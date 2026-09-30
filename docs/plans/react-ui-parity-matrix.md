@@ -392,6 +392,8 @@ Sources below are relative to `static/js/`; React owners are under `ui/src/`. Al
 
 | P-373 | Terminal creation: saved name-prefix suggestion | Required | `modals/add-cell.js`; `commands.js::_nextName`; D-220 | AgentCreateDialog | Save/reopen the group prefix, suggest an unused suffix across groups, create the suggested name, preserve custom text/caret and explicit clearing through reconnect, and freeze submitted names during refusal/retry. |
 
+| P-374 | Worker creation: kind-specific launch preview and actual defaults | Required | `server_agent.py::resolve_worker_launch_config`; generic Classic preview does not resolve kind defaults; D-222 | AgentCreateDialog and shared agent_launch_defaults | Save/reload distinct shared/worker defaults; preview and launch the worker command/model/reasoning/fast-mode values; retain explicit edits on refresh and exact retry; clear worker defaults and launch shared fallback; keep role precedence and raw command finalization consistent. |
+
 ## Command inventory
 
 Each literal classic transport command is inventoried independently. Dynamic command families and native operations are covered by the behavior rows and the source inventory below. A React occurrence does not establish a discoverable control, correct payload, response handling or parity. These are required verification rows unless a specific retirement decision says otherwise.
@@ -2574,3 +2576,21 @@ The directory fixture's initial exact-label mismatch consumed its timeout and pr
 No backend/protocol implementation changed, so the preceding full 3,276-test/82-skip result was not repeated. Complete browser/native suites were not rerun. The canonical field count remains 142; eleven controls now explicitly describe their retained metadata/compatibility role. Ledger remains **373 mapped / 365 implemented or equivalent / four broad open / four intentional retirements**. The next consolidation must distinguish already accepted fields from remaining explicit provider/model/reasoning/fast-mode override round trips, session-resume/idle behavior and broad lazy/reconnect coverage; those are not certified by this checkpoint.
 
 Final QA cleanup: runtime evidence confirmed zero PTYs; only exact disposable daemon/ingest/supervisor PIDs 99941/99955/99956 were stopped, their absence verified and port 19080 released (`/private/tmp/launch-metadata-runtime-final-20260930.json`). Documentation contracts and diff checks passed. Browser inventory is 175 tests / 111 files, not a complete-suite run.
+
+
+### Worker launch default repair (2026-09-30; acceptance pending)
+
+P-374 reproduced a concrete P-088 launch gap: New Worker requested a generic preview and resubmitted shared values as explicit overrides, bypassing stored worker defaults. Backend and component regressions failed before the fix. D-222 shares worker override and fast-mode precedence between preview and executable launch while preserving raw commands, generic preview compatibility and reviewed creation retries. Full UI/backend and real-process browser acceptance are pending. Pending ledger: **374 mapped / 365 implemented or equivalent / five open / four intentional retirements**.
+
+
+### Worker launch default acceptance (2026-09-30)
+
+P-374/D-222 is accepted. A backend preview regression and a component request regression both failed before the repair. After the shared precedence fix, 65 focused backend tests and 35 creation/recovery component tests passed. The final `make ui-check` passed lint, typecheck, **112 files / 1,039 tests**, production build and bundle verification (`/private/tmp/worker-preview-ui-check-final-20260930.log`).
+
+The full required `make test TEST_PYTHON=/Users/aleksanderarruda/.torque/runtime/venv/bin/python` passed **3,277 tests / 82 skips** in 608.7 seconds (`/private/tmp/worker-preview-full-test-20260930.log`; immutable footer `.torque/test-results/test-20260930T123820.085113Z-6fa5aadf5d26-f44884ae1bd9d540.json`, exit 0). The new backend test compares raw preview values with actual launch resolution, including exactly-once model/reasoning flags, role/worker/shared precedence, explicit overrides, fast-mode inheritance and literal environment values.
+
+Final production-browser acceptance passed **2/2 scenarios in 23.9 seconds** (`/private/tmp/worker-preview-browser-final-20260930.log`). Three real Python receiver processes prove Settings save/reload, worker command selection, explicit command retention after refresh and shared fallback after clearing worker settings. Model/reasoning/fast-mode previews and submitted payloads match the reviewed values. Nine adjacent metadata launches also passed. Generic receivers prove launch selection and arguments; they do not claim external provider inference or Codex Fast service-tier behavior. The latter preference is covered here by persisted Settings, preview/submission and backend resolution. Inspected screenshot and JSON evidence.
+
+Browser fixture corrections used the native select's accessible combobox and the submitted worker payload: compact agent snapshots omit fast mode, and the resolved per-agent settings endpoint supports principals only. Installed Chrome was used because bundled Chromium was unavailable. All runs removed their created agents. QA19081/profile `react-worker-preview-20260930` finished with zero PTYs; its exact daemon/sidecars exited and the port was released. Documentation contracts and diff checks passed.
+
+Ledger: **374 mapped / 366 implemented or equivalent / four broad open / four intentional retirements**. The current browser inventory is 176 tests in 112 files; the complete browser/native suites were not rerun. P-087/P-088/P-089/P-112 remain open. The field search index now points to session-resume, idle-timeout, behavior-approval and principal reasoning/fast-mode integration evidence as the next checks; test-name or source presence alone is not acceptance.
