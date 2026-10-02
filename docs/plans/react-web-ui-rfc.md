@@ -1,6 +1,6 @@
 # RFC: React web UI architecture and migration
 
-Status: Accepted — React is the default; parity hardening and classic retirement remain open
+Status: Accepted — React is the default; Phase 4 feature parity accepted 2026-10-02; classic retirement remains open
 Date: 2026-08-11
 Owners: Torque product and frontend maintainers
 
@@ -674,6 +674,8 @@ reconnect states.
 Gate:
 
 - the parity matrix has no unexplained required gaps.
+
+Final acceptance (2026-10-02): this gate is satisfied. The [parity ledger](react-ui-parity-matrix.md) records 412 accepted required/equivalent behaviors, four explicit retirements, zero remaining required gaps, and a clean 219/219 browser run. Earlier checkpoints below describe the audit and repairs leading to that acceptance.
 
 Parity audit checkpoint (2026-09-21): **incomplete**. The previous coarse map
 conflated event feeds with real logs, selected-agent threads with aggregate
@@ -1643,3 +1645,10 @@ The complete 219-case browser suite is running against frozen `9c81a202` fronten
 ### Browser fixture correction checkpoint (2026-10-02)
 
 The full frozen run completed **217/219 passing**, with no skips. The two failures were isolated to fixture request ownership and viewport-observer synchronization. Both corrected scenarios and their adjacent Board preview scenario now pass together **3/3** on a fresh isolated profile. The full UI gate passes **125 files / 1,130 tests**, lint, typecheck and production build; rebuilt assets exactly match the previous full-run assets. The current parity ledger records the original requirement reconciliation, native evidence, fixture diagnoses and screenshot review. No production behavior changed at this checkpoint. Ledger: **416 mapped / 412 accepted / zero recorded feature repairs / four intentional retirements**. A clean complete 219-case browser run and final evidence reconciliation remain required before closing Phase 4; the previous failing run is not relabeled as passing.
+
+
+### Final Phase 4 parity acceptance (2026-10-02)
+
+The complete browser suite passes **219/219**, zero failures or skips, in 54.6 minutes on frozen commit `125cf912`. Both previously failing fixtures pass in the full run. Frozen HEAD, clean source, all nine UI asset hashes and one execution of every scenario were verified before documentation updates. The UI gate passes **125 files / 1,130 tests** plus lint, typecheck, build and build verification. Documentation, diff, Rust formatting and native-permission checks pass. The unchanged backend retains its **3,291-test / 82-skip** full regression evidence; current native evidence includes **35 Rust unit tests, two binary integration tests, ten actual window geometry scenarios, and main/detach/resize/close/main PTY handoff**.
+
+The ledger's original-requirement, field, command, modal and state-continuity reconciliations now have their complete-run gate satisfied. **Phase 4 feature parity is accepted: 416 mapped, 412 implemented/accepted required or equivalent behaviors, four explicit retirements, zero remaining required gaps.** The final ledger entry records exact evidence and test boundaries, including single-host native execution and local external-provider fixtures. Only the isolated QA runtime was stopped after verifying zero PTY sessions. Classic fallback retirement, burn-in and release publication remain separate lifecycle gates.

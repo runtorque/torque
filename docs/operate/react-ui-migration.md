@@ -96,7 +96,7 @@ place; either renderer ignores keys it does not own.
 
 ## Parity repair status and isolated QA
 
-The [behavior and field ledger](../plans/react-ui-parity-matrix.md) is the release authority for parity. Logs, aggregate read-only Chat and Pipelines now have dedicated Control Center sections. Organization, lane visibility, operational detail and typed settings have focused coverage; the remaining acceptance rows still block classic retirement.
+The [behavior and field ledger](../plans/react-ui-parity-matrix.md) is the authority for parity. Phase 4 feature parity was accepted on 2026-10-02: 412 required/equivalent behaviors accepted, four explicit retirements, and a complete 219/219 browser pass. Logs, aggregate read-only Chat and Pipelines have dedicated Control Center sections; organization, lane visibility, operational detail and typed settings have granular acceptance evidence. The ledger records native and external-fixture testing boundaries. Classic retirement still requires the separate burn-in and retirement gates below.
 
 For source-only QA without Make's install prerequisite, use an unused port and a new disposable data directory from a non-worker shell:
 
