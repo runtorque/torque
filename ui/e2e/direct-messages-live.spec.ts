@@ -58,9 +58,21 @@ test('retained direct messages preserve reading anchors, render safe rich conten
     await page.evaluate(() => { Object.defineProperty(navigator.clipboard, 'writeText', { configurable: true, value: () => Promise.reject(new Error('Injected clipboard refusal')) }); });
     const paragraph = message.locator('p').filter({ hasText: 'Bold and emphasis' }); await paragraph.evaluate((node) => { const range = document.createRange(); range.selectNodeContents(node); const selection = window.getSelection()!; selection.removeAllRanges(); selection.addRange(range); });
     const selectedText = await page.evaluate(() => window.getSelection()?.toString()); await message.getByRole('button', { name: 'Copy message', exact: true }).click(); await expect(page.getByRole('status').filter({ hasText: 'Could not copy message' })).toBeVisible(); expect(await page.evaluate(() => window.getSelection()?.toString())).toBe(selectedText); await expect(input).toHaveValue('Keep this composer draft');
-    await page.setViewportSize({ width: 1440, height: 1100 }); await split.focus(); await split.press('End'); await message.scrollIntoViewIfNeeded(); await expect(message.getByRole('heading', { name: 'Reading checkpoint' })).toBeInViewport();
+    // Viewport resizing finishes before ResizeObserver publishes the new
+    // separator limit. Wait for that observable limit before pressing End.
+    const beforeWideMaximum = Number(await split.getAttribute('aria-valuemax'));
+    await page.setViewportSize({ width: 1440, height: 1100 });
+    await expect.poll(async () => Number(await split.getAttribute('aria-valuemax'))).toBeGreaterThan(beforeWideMaximum);
+    await split.focus(); await split.press('End');
+    await expect.poll(async () => Math.abs(Number(await split.getAttribute('aria-valuenow')) - Number(await split.getAttribute('aria-valuemax')))).toBeLessThan(1);
+    await message.scrollIntoViewIfNeeded(); await expect(message.getByRole('heading', { name: 'Reading checkpoint' })).toBeInViewport();
     await page.screenshot({ animations: 'disabled', path: test.info().outputPath('direct-message-reading.png') });
-    await page.setViewportSize({ width: 760, height: 720 }); await split.focus(); await split.press('End'); await log.scrollIntoViewIfNeeded(); await expect(log).toBeInViewport(); await expect(message.getByRole('button', { name: 'Copy message', exact: true })).toBeVisible(); expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true); await page.screenshot({ animations: 'disabled', path: test.info().outputPath('direct-message-compact.png') });
+    const beforeCompactMaximum = Number(await split.getAttribute('aria-valuemax'));
+    await page.setViewportSize({ width: 760, height: 720 });
+    await expect.poll(async () => Number(await split.getAttribute('aria-valuemax'))).toBeLessThan(beforeCompactMaximum);
+    await split.focus(); await split.press('End');
+    await expect.poll(async () => Math.abs(Number(await split.getAttribute('aria-valuenow')) - Number(await split.getAttribute('aria-valuemax')))).toBeLessThan(1);
+    await log.scrollIntoViewIfNeeded(); await expect(log).toBeInViewport(); await expect(message.getByRole('button', { name: 'Copy message', exact: true })).toBeVisible(); expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true); await page.screenshot({ animations: 'disabled', path: test.info().outputPath('direct-message-compact.png') });
     await split.focus(); await split.press('Home'); await message.getByRole('button', { name: 'Copy message', exact: true }).scrollIntoViewIfNeeded(); await expect(page.getByRole('status').filter({ hasText: 'Could not copy message' })).toBeInViewport(); await expect(message.getByRole('button', { name: 'Copy message', exact: true })).toBeInViewport(); await page.getByRole('button', { name: 'Dismiss copy status', exact: true }).click(); await expect(page.getByRole('status').filter({ hasText: 'Could not copy message' })).toHaveCount(0);
   } finally { for (const id of created.reverse()) await command(request, { cmd: 'remove_agent', id }); }
 });

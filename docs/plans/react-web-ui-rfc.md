@@ -1631,3 +1631,15 @@ P-410/D-241 restores the actual pending-deploy count, task details, scoped polli
 ### Workspace status acceptance
 
 P-411–P-416/D-242 restore operational workload/task/attention counts and navigation, account quota windows, live metrics and supervisor status. The UI gate passes 125 files / 1,130 tests; all four scoped browser scenarios pass, with retained drafts/caret and narrow-window keyboard access. Ledger: 416 mapped / 412 accepted / no recorded open repairs / four intentional retirements. This does not close Phase 4: current native handoff and the full 219-case browser suite remain pending, alongside the final evidence reconciliation.
+
+
+### Current native acceptance and final reconciliation (2026-10-01)
+
+The original takeover requirements and remaining command/modal evidence are reconciled in the parity ledger's 2026-10-01 checkpoint. Current actual native main/detach/resize/close/main acceptance preserves the same PTY, three once-only input markers and an unsent draft. Current Rust checks pass 35 unit and two binary integration tests. All ten visible native geometry scenarios pass after correcting the QA example to use the current OS work area; its intentional failure now exits 1 instead of inheriting a misleading GUI-loop success status. No product feature gap was found by this geometry check.
+
+The complete 219-case browser suite is running against frozen `9c81a202` frontend assets on a fresh isolated profile with all local opt-ins. Phase 4 remains open pending that verdict, unchanged-build verification and final evidence reconciliation. Ledger remains 416 mapped / 412 accepted / zero recorded feature repairs / four intentional retirements. No live/default daemon was deployed, stopped or restarted.
+
+
+### Browser fixture correction checkpoint (2026-10-02)
+
+The full frozen run completed **217/219 passing**, with no skips. The two failures were isolated to fixture request ownership and viewport-observer synchronization. Both corrected scenarios and their adjacent Board preview scenario now pass together **3/3** on a fresh isolated profile. The full UI gate passes **125 files / 1,130 tests**, lint, typecheck and production build; rebuilt assets exactly match the previous full-run assets. The current parity ledger records the original requirement reconciliation, native evidence, fixture diagnoses and screenshot review. No production behavior changed at this checkpoint. Ledger: **416 mapped / 412 accepted / zero recorded feature repairs / four intentional retirements**. A clean complete 219-case browser run and final evidence reconciliation remain required before closing Phase 4; the previous failing run is not relabeled as passing.

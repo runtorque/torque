@@ -20,31 +20,34 @@ test('Board activity keeps its reading window and draft through a real deadline,
   await command(request, { cmd: 'board_update_task', id, messages });
   await page.goto('/'); await page.getByRole('button', { name: /▦ Board/ }).click(); await page.getByRole('button', { name: group, exact: true }).click();
   await page.getByRole('button', { name: `Actions for ${title}`, exact: true }).click(); await page.getByRole('menuitem', { name: 'Task activity', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: title, exact: true }); const rows = dialog.getByRole('article');
+  const dialog = page.getByRole('dialog', { name: title, exact: true }); const activity = dialog.getByRole('region', { name: 'Task activity', exact: true }); const rows = activity.getByRole('article');
   await expect(rows).toHaveCount(40); await dialog.getByRole('button', { name: 'Load older activity · 45 remaining', exact: true }).click(); await expect(rows).toHaveCount(80);
   const draft = dialog.getByRole('textbox', { name: 'Description', exact: true }); await draft.fill('Keep this unsaved description'); await draft.focus();
   await draft.evaluate((node: HTMLTextAreaElement) => { node.dataset.owner = 'retained'; node.setSelectionRange(2, 8); });
   await rows.first().evaluate((node) => { (node as HTMLElement).dataset.anchor = 'retained'; });
-  let held = false; let release = () => {}; let wrong = true;
+  // Activity and selected-task evidence own separate refreshes. Hold both,
+  // then inject the wrong identity only for the explicit Activity retry.
+  let phase: 'hold' | 'wrong' | 'pass' = 'hold'; const releases: (() => void)[] = []; let held = 0;
   await page.route('**/api/cmd', async (route) => {
     const data = route.request().postDataJSON() as Row;
     if (data.cmd !== 'task_detail' || data.id !== id) { await route.continue(); return; }
-    if (!held) { held = true; const response = await route.fetch(); await new Promise<void>((resolve) => { release = resolve; }); await route.fulfill({ response }); return; }
-    if (wrong) { wrong = false; await route.fulfill({ json: { ok: true, data: { type: 'task_detail', id: 'unrelated', task: { id: 'unrelated', messages: [{ message: 'Unrelated activity' }] } } } }); return; }
+    if (phase === 'hold') { held++; const response = await route.fetch(); await new Promise<void>((resolve) => { releases.push(resolve); }); await route.fulfill({ response }); return; }
+    if (phase === 'wrong') { await route.fulfill({ json: { ok: true, data: { type: 'task_detail', id: 'unrelated', task: { id: 'unrelated', messages: [{ message: 'Unrelated activity' }] } } } }); return; }
     await route.continue();
   });
   try {
-    await command(request, { cmd: 'board_update_task', id, messages: [...messages, { message: 'New arrival' }] }); await expect.poll(() => held).toBe(true);
-    await expect(dialog.getByRole('alert')).toContainText('timed out', { timeout: 20_000 }); await expect(rows).toHaveCount(80); await expect(rows.first()).toHaveAttribute('data-anchor', 'retained');
+    await command(request, { cmd: 'board_update_task', id, messages: [...messages, { message: 'New arrival' }] }); await expect.poll(() => held).toBeGreaterThan(0);
+    await expect(activity.getByRole('alert')).toContainText('timed out', { timeout: 20_000 }); await expect(rows).toHaveCount(80); await expect(rows.first()).toHaveAttribute('data-anchor', 'retained');
     await expect(draft).toHaveValue('Keep this unsaved description'); await expect(draft).toBeFocused(); await expect(draft).toHaveAttribute('data-owner', 'retained');
     expect(await draft.evaluate((node: HTMLTextAreaElement) => [node.selectionStart, node.selectionEnd])).toEqual([2, 8]);
-    await page.screenshot({ path: test.info().outputPath('board-activity-timeout.png') });
-    await dialog.getByRole('button', { name: 'Retry activity', exact: true }).click(); await expect(dialog.getByRole('alert')).toContainText('Could not refresh activity'); await expect(dialog.getByText('Unrelated activity')).toHaveCount(0);
-    await dialog.getByRole('button', { name: 'Retry activity', exact: true }).click(); await expect(dialog.getByRole('alert')).toHaveCount(0);
-    await expect(dialog.getByRole('button', { name: 'Show 1 new messages', exact: true })).toBeVisible(); release(); await expect(rows.first()).toHaveAttribute('data-anchor', 'retained');
-    await dialog.getByRole('button', { name: 'Show 1 new messages', exact: true }).click(); await expect(rows.first()).toContainText('New arrival');
+    await page.screenshot({ path: test.info().outputPath('board-activity-timeout.png'), animations: 'disabled' });
+    phase = 'wrong'; await activity.getByRole('button', { name: 'Retry activity', exact: true }).click(); await expect(activity.getByRole('alert')).toContainText('Could not refresh activity'); await expect(dialog.getByText('Unrelated activity')).toHaveCount(0);
+    phase = 'pass'; await activity.getByRole('button', { name: 'Retry activity', exact: true }).click(); await expect(activity.getByRole('alert')).toHaveCount(0);
+    await expect(dialog.getByRole('button', { name: 'Show 1 new messages', exact: true })).toBeVisible(); releases.forEach((release) => release()); await expect(rows.first()).toHaveAttribute('data-anchor', 'retained');
+    await activity.getByRole('button', { name: 'Show 1 new messages', exact: true }).click(); await expect(rows.first()).toContainText('New arrival');
+    await dialog.getByRole('button', { name: 'Retry task details', exact: true }).click(); await expect(dialog.getByRole('alert')).toHaveCount(0); await expect(rows.first()).toContainText('New arrival'); await expect(draft).toHaveValue('Keep this unsaved description');
     await dialog.getByRole('button', { name: 'Cancel', exact: true }).click(); expect(((await command(request, { cmd: 'task_detail', id })).task as Row).description).toBe('');
-  } finally { release(); }
+  } finally { releases.forEach((release) => release()); }
 });
 test('Board prompt preview releases a real deadline and renders the explicitly retried current draft', async ({ page, request }) => {
   test.setTimeout(60_000); const title = 'Recover Board preview'; const { group, id } = await prepare(request, title);

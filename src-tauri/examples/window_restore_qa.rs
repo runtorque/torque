@@ -1,5 +1,6 @@
 //! Opt-in real-window smoke test. Runs an isolated shell with no daemon or UI.
 //! cargo run --offline --manifest-path src-tauri/Cargo.toml --example window_restore_qa
+//! Add -- --verify-failure-exit to verify that a failed check exits with code 1.
 use std::sync::{
     atomic::{AtomicI32, Ordering},
     Arc,
@@ -10,6 +11,9 @@ use torque_desktop::commands::window::{restore_window_bounds, window_bounds, Win
 use torque_desktop::window_geometry::WindowGeometryPolicy;
 
 fn check(app: &tauri::AppHandle) -> Result<(), String> {
+    if std::env::args().any(|arg| arg == "--verify-failure-exit") {
+        return Err("Intentional failure to verify the QA process exit status".into());
+    }
     let mut monitors = app
         .available_monitors()
         .map_err(|error| error.to_string())?;
@@ -93,7 +97,20 @@ fn check(app: &tauri::AppHandle) -> Result<(), String> {
             let captured = window_bounds(&window)?;
             let position = window.outer_position().map_err(|error| error.to_string())?;
             let size = window.outer_size().map_err(|error| error.to_string())?;
-            let fits = monitors.iter().any(|monitor| {
+            // macOS can change the work area while the first test window is
+            // shown (for example, as the Dock settles). Compare with the same
+            // current desktop that restoration uses, not the startup capture.
+            let mut current_monitors = window
+                .available_monitors()
+                .map_err(|error| error.to_string())?;
+            if let Some(primary) = window
+                .primary_monitor()
+                .map_err(|error| error.to_string())?
+            {
+                current_monitors.retain(|monitor| monitor.position() != primary.position());
+                current_monitors.insert(0, primary);
+            }
+            let fits = current_monitors.iter().any(|monitor| {
                 let area = monitor.work_area();
                 position.x >= area.position.x - 1
                     && position.y >= area.position.y - 1
@@ -106,7 +123,8 @@ fn check(app: &tauri::AppHandle) -> Result<(), String> {
                 "{}",
                 serde_json::json!({"policy": name, "scenario": scenario,
                 "requested": bounds, "captured": captured, "outer_position": position,
-                "outer_size": size, "fits_work_area": fits})
+                "outer_size": size, "current_monitors": current_monitors,
+                "fits_work_area": fits})
             );
             if !fits {
                 return Err(format!("{label} is outside the usable desktop"));
@@ -140,7 +158,8 @@ fn main() {
         .expect("isolated native QA shell");
     let result_code = Arc::new(AtomicI32::new(1));
     let callback_result = result_code.clone();
-    app.run(move |app, event| {
+    // run() exits the process itself; return so the QA verdict controls status.
+    app.run_return(move |app, event| {
         if let RunEvent::ExitRequested {
             code: None, api, ..
         } = &event
