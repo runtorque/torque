@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { Provider } from 'react-redux';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { browserHost, createTauriHost } from '../host';
 import { compactStateFixture } from '../protocol/fixtures';
@@ -33,6 +33,15 @@ function renderShell(host = browserHost, frame: StateFrame = compactStateFixture
   );
   return { appStore, sendCommand, detailReads };
 }
+
+// Load real lazy feature modules during setup so cold Vite transforms on CI
+// do not consume Testing Library's one-second interaction timeout.
+beforeAll(async () => {
+  await Promise.all([
+    import('../features/control/ControlCenter'),
+    import('../features/planning/PlanningWorkspace'),
+  ]);
+});
 
 afterEach(() => vi.unstubAllGlobals());
 

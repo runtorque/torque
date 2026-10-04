@@ -204,7 +204,11 @@ pub fn detach_panel(
         builder = builder.menu(menu);
     }
     let window = builder.build().map_err(|error| error.to_string())?;
-    restore_window_bounds(&window, &bounds.unwrap_or_default(), WindowGeometryPolicy::DETACHED)?;
+    restore_window_bounds(
+        &window,
+        &bounds.unwrap_or_default(),
+        WindowGeometryPolicy::DETACHED,
+    )?;
     window.show().map_err(|error| error.to_string())?;
     window_state.remember_detached(panel, label.clone());
     window_state.set_active_label(label.clone());
