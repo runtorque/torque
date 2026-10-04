@@ -59,5 +59,15 @@ jobs:
         run: rustup toolchain install stable --profile minimal
       - name: Check Rust formatting
         run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ui/.nvmrc
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - name: Install locked frontend dependencies
+        run: npm --prefix ui ci
+      # Direct cargo commands do not run Tauri's beforeBuildCommand hook.
+      - name: Build frontend assets for the desktop host
+        run: npm --prefix ui run build
       - name: Test desktop host
         run: cargo test --manifest-path src-tauri/Cargo.toml --locked
