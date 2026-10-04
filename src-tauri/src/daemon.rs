@@ -1024,6 +1024,14 @@ mod tests {
 import json
 import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from socketserver import TCPServer
+
+class LocalHTTPServer(ThreadingHTTPServer):
+    def server_bind(self):
+        # These loopback fixtures do not need HTTPServer's reverse DNS lookup.
+        TCPServer.server_bind(self)
+        self.server_name = "localhost"
+        self.server_port = self.server_address[1]
 
 class Handler(BaseHTTPRequestHandler):
     def _respond(self):
@@ -1055,7 +1063,7 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *_args):
         pass
 
-ThreadingHTTPServer(('127.0.0.1', int(os.environ['TORQUE_PORT'])), Handler).serve_forever()
+LocalHTTPServer(('127.0.0.1', int(os.environ['TORQUE_PORT'])), Handler).serve_forever()
 "#,
         )
         .expect("write fake daemon script");
