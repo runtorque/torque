@@ -49,7 +49,7 @@ jobs:
       - name: Verify Tauri command permissions
         run: python3 scripts/lint_tauri_permissions.py
       - name: Verify fail-closed community package
-        run: python3 scripts/assert_community_package_excludes_ee.py
+        run: python3 -m unittest tests.test_packaging_exclusion
 
   desktop-check:
     runs-on: macos-latest

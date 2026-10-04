@@ -68,6 +68,8 @@ ui-check: ui-deps
 	$(UI_NPM) --prefix "$(UI_DIR)" run build
 
 ## install-standalone: Copy the primary standalone/desktop app files to ~/.torque/app
+# NUL-delimited copy loops require Bash read -d (Ubuntu /bin/sh is dash).
+install-standalone: SHELL := /bin/bash
 install-standalone: ui-build
 	@mkdir -p "$(PRIMARY_APP_DIR)/torque"
 	@mkdir -p "$(PRIMARY_APP_DIR)/static/js"
