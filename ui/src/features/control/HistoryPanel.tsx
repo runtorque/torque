@@ -102,4 +102,3 @@ export function HistoryPanel({ group, send }: {
     </div>
   </div>;
 }
-

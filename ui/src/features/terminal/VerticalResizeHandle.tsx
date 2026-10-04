@@ -74,4 +74,3 @@ export function VerticalResizeHandle({ label, value, minimum, maximum, className
     onKeyDown={resizeFromKeyboard}
   ><span aria-hidden="true" /></div>;
 }
-

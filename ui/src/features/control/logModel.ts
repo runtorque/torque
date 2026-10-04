@@ -9,4 +9,3 @@ export function matchesLog(line: LogLine, level: string, search: string): boolea
   try { return new RegExp(query, 'i').test(value); }
   catch { return value.toLocaleLowerCase().includes(query.toLocaleLowerCase()); }
 }
-

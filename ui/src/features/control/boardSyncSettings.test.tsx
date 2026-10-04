@@ -18,7 +18,7 @@ it('discovers projects from unsaved settings, resolves selection, and fills only
   const calls: UnknownRecord[] = [];
   vi.stubGlobal('fetch', vi.fn((_url, options: RequestInit) => {
     const command = JSON.parse(typeof options.body === 'string' ? options.body : '{}') as UnknownRecord; calls.push(command);
-    return Promise.resolve(reply(command.cmd === 'board_sync_list_projects' ? { type: command.cmd, ok: true, group: 'QA', provider: 'github', projects: [project], errors: [{ error: 'Other owner denied' }] } : frame({ project_owner: 'team', project_number: 7, project_id: 'P7', status_options: { Ready: 'S1' }, lane_status_map_suggestion: { Todo: 'Ready' }, lane_status_map_strategy: 'position', lane_status_map_unmatched_lanes: ['Review'] }))); 
+    return Promise.resolve(reply(command.cmd === 'board_sync_list_projects' ? { type: command.cmd, ok: true, group: 'QA', provider: 'github', projects: [project], errors: [{ error: 'Other owner denied' }] } : frame({ project_owner: 'team', project_number: 7, project_id: 'P7', status_options: { Ready: 'S1' }, lane_status_map_suggestion: { Todo: 'Ready' }, lane_status_map_strategy: 'position', lane_status_map_unmatched_lanes: ['Review'] })));
   }));
   render(<Form />); expect(calls).toHaveLength(0);
   fireEvent.click(screen.getByRole('button', { name: 'Load GitHub projects' })); await screen.findByRole('option', { name: /Delivery/ });
