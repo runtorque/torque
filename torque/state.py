@@ -364,6 +364,8 @@ COMPACT_BOARD_TASK_FIELDS = (
     "agent_id",
     "assigned_engineer_id",
     "assigned_architect_id",
+    "created_by_architect_id",
+    "created_by_engineer_id",
     "parent_task_id",
     "pipeline_depth",
     "status",
@@ -2050,6 +2052,8 @@ def _compact_worktree_boundary_summary(boundary) -> dict:
             "repo_root",
             "branch",
             "base_branch",
+            "commit_sha",
+            "recorded_by_agent_id",
             "status",
             "recorded_at",
             "merged_at",
@@ -2747,35 +2751,7 @@ class MatrixState(
         self.schedules: dict[str, Schedule] = {}
         self.agent_message_loops: dict[str, AgentMessageLoop] = {}
         self.auto_dispatch_queues: dict[str, list[AutoDispatchQueueEntry]] = {}
-        self.panel_active: str = ""  # '' | 'board' | 'actions' | 'events'
-        self.board_panel_height: int = 0  # 0 = use CSS default
-        # Browser/Tauri UI state mirrored through ui_state so standalone,
-        # desktop, and detached-window sessions restore after daemon restart.
-        self.active_group: str = ""
-        # Legacy principal selector state mirrored through ui_state for older
-        # clients/sessions. Empty string means "user"; architect ids are
-        # persisted but no longer filter the agent grid.
-        self.selected_principal_id: str = ""
-        # Browser-local selectedAgentId mirrored through ui_state so detached
-        # windows can hydrate the same Agent/Context panel focus.
-        self.selected_agent_id: str = ""
-        self.standalone_panel_layout: dict = {}
-        self.detached_panels: dict[str, dict] = {}
-        self.window_bounds: dict[str, dict] = {}
-        self.workspace_sidebar_width: int = 0
-        self.terminal_direct_messages_height: int = 0
-        self.terminal_compose_height: int = 0
-        self.engineer_panel_split_fraction: float = 0.30
-        self.context_panel_split_ratio: float = 0.38
-        self.supervisor_panel_state: dict = {}
-        self.events_dismissed_attention: dict[str, float] = {}
-        self.mission_control_dismissed_cards: dict[str, float] = {}
-        self.board_filters_by_group: dict[str, dict] = {}
-        self.board_selected_lanes_by_group: dict[str, str] = {}
-        self.board_hidden_wide_lanes_by_group: dict[str, dict] = {}
-        self.board_saved_views_by_group: dict[str, list] = {}
-        self.board_lane_sorts_by_group: dict[str, dict] = {}
-        self.board_card_density_by_group: dict[str, str] = {}
+        self._initialize_ui_preferences()
         self.panel_log = None  # PanelEventLog, set from server.py
         # Engineer settings (per-group)
         self.engineer_settings: dict[str, EngineerSettings] = {}
@@ -3741,6 +3717,7 @@ class MatrixState(
             "engineer_panel_split_fraction": self.engineer_panel_split_fraction,
             "context_panel_split_ratio": self.context_panel_split_ratio,
             "supervisor_panel_state": self.supervisor_panel_state,
+            "react_workspace_state": self.react_workspace_state,
             "events_dismissed_attention": self.events_dismissed_attention,
             "mission_control_dismissed_cards": self.mission_control_dismissed_cards,
             "board_filters_by_group": self.board_filters_by_group,
@@ -4063,6 +4040,7 @@ class MatrixState(
             "engineer_panel_split_fraction": self.engineer_panel_split_fraction,
             "context_panel_split_ratio": self.context_panel_split_ratio,
             "supervisor_panel_state": self.supervisor_panel_state,
+            "react_workspace_state": self.react_workspace_state,
             "events_dismissed_attention": self.events_dismissed_attention,
             "mission_control_dismissed_cards": self.mission_control_dismissed_cards,
             "board_filters_by_group": self.board_filters_by_group,
@@ -4359,6 +4337,7 @@ class MatrixState(
                 self.db.save_groups_and_members_deferred(
                     self.groups,
                     self.group_slugs,
+                    self._children,
                 )
             except Exception:
                 log.exception("Failed to save groups")

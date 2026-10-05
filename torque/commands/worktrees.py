@@ -13,6 +13,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from ..config import log
+from .worktree_creation import handle_worktree_create
+from .worktree_removal import removal_preview, remove_reviewed_worktree
 
 
 WORKTREE_COMMAND_NAMES = frozenset({
@@ -20,6 +22,7 @@ WORKTREE_COMMAND_NAMES = frozenset({
     "worktree_advance_boundary",
     "worktree_adopt",
     "worktree_remove",
+    "worktree_remove_preview",
     "worktree_list",
     "worktree_prune",
     "worktree_checkpoint",
@@ -87,6 +90,8 @@ class WorktreeCommandRuntime:
     target_has_driverless_payload: Any
     untracked_overwrite_message: Any
     workflow_breach_active_task_for_worker: Any
+    worktree_removal_refusal_reason: Any
+    worktree_path_contains: Any
     worktree_full_diff: Any
     worktree_merge_error: Any
     worktree_merge_requested_cleanup: Any
@@ -175,92 +180,7 @@ async def handle_worktree_command(
     result = None
 
     if cmd == "worktree_create":
-        cell = state.agents.get(data["id"])
-        if cell and not cell.worktree_path and cell.directory:
-            gs = state.get_group_settings(cell.group)
-            repo_root = await worktree_mgr.get_repo_root(
-                cell.directory)
-            if repo_root:
-                wt_path = await worktree_mgr.create(
-                    cell, repo_root,
-                    base_dir=cell.worktree_base_dir
-                        or ".torque/worktrees",
-                    base_branch=cell.worktree_base_branch
-                        or gs.worktree_base_branch or "",
-                    symlinks=gs.worktree_symlinks,
-                    include_gitignored_symlinks=getattr(
-                        gs,
-                        "worktree_symlink_gitignored_paths",
-                        False,
-                    ),
-                    worktree_submodules=getattr(
-                        gs,
-                        "worktree_submodules",
-                        [],
-                    ),
-                    state=state,
-                )
-                if wt_path:
-                    cell.directory = wt_path
-                    state._emit_agent(cell)
-                    state._db_save_agent(cell)
-                    # Relaunch if requested by the UI
-                    if data.get("relaunch"):
-                        if cell.session_id:
-                            await bridge.close_session(
-                                cell.session_id)
-                        cell.status = "stopped"
-                        cell.session_id = None
-                        # Clear session ID — the old session
-                        # may not exist (no prompts sent yet)
-                        cell.agent_session_id = ""
-                        base_dir = cell.worktree_repo_root \
-                            or cell.directory \
-                            or await _resolve_base_dir(cell.group)
-                        launch_resolver = _launch_resolver_for_cell(
-                            cell,
-                            resolve_agent_launch_config=
-                            _resolve_agent_launch_config,
-                            resolve_engineer_launch_config=
-                            _resolve_engineer_launch_config,
-                            resolve_architect_launch_config=
-                            _resolve_architect_launch_config,
-                            resolve_worker_launch_config=
-                            _resolve_worker_launch_config,
-                            is_designated_engineer=
-                            _is_designated_engineer,
-                        )
-                        launch_cfg = launch_resolver(
-                            cell.group,
-                            base_dir=base_dir,
-                            explicit_template=cell.template,
-                            overrides={},
-                        )
-                        if cell.agent_type:
-                            get_adapter(cell.agent_type) \
-                                .uninstall_persistent_prompt(
-                                    os.path.expanduser(repo_root),
-                                    _persistent_prompt_filename(cell))
-                        _apply_persistent_prompt(
-                            cell, launch_cfg,
-                            _build_cell_persistent_prompt(
-                                cell, launch_cfg))
-                        state._emit_agent(cell)
-                        state._db_save_agent(cell)
-                        await bridge.create_session(
-                            cell,
-                            env_vars=runtime_env_vars_for_cell(
-                                cell, launch_cfg.get("env_vars")),
-                            env_file=launch_cfg.get("env_file", ""),
-                            shell=launch_cfg.get("shell", ""),
-                            system_prompt=launch_cfg.get(
-                                "system_prompt", ""),
-                            mcp_entrypoint=mcp_entrypoint_for_cell(
-                                cell),
-                            target_session_id=data.get(
-                                "target_session_id", ""),
-                            target_window_id=data.get(
-                                "target_window_id", ""))
+        return await handle_worktree_create(data, runtime)
     elif cmd == "worktree_advance_boundary":
         target, live_cell, error_result = await _resolve_worktree_command_target_value(
             state=state,
@@ -382,7 +302,13 @@ async def handle_worktree_command(
                             build_cell_persistent_prompt=_build_cell_persistent_prompt,
                             send_agent_prompt=_send_agent_prompt,
                         )
+    elif cmd == "worktree_remove_preview":
+        return await removal_preview(data, runtime)
     elif cmd == "worktree_remove":
+        if "removal_review" in data:
+            if _target_has_driverless_payload(data):
+                return {"type": "worktree_remove", "id": str(data.get("id", "") or ""), "ok": False, "error": "Reviewed release requires an agent target"}
+            return await remove_reviewed_worktree(data, runtime)
         if _target_has_driverless_payload(data):
             target, _cell, error_result = await _resolve_worktree_command_target_value(
                 state=state,
@@ -483,6 +409,9 @@ async def handle_worktree_command(
                     "message": "Agent has no worktree",
                     "id": cell.id,
                 }
+            else:
+                result = {"type": "error", "id": str(data.get("id", "") or ""),
+                          "message": "Agent not found"}
     elif cmd == "worktree_list":
         requested_root = str(data.get("repo_root", "") or "").strip()
         repo_root = (
@@ -617,18 +546,21 @@ async def handle_worktree_command(
             }
             return result
     elif cmd == "worktree_checkpoint":
-        cell = state.agents.get(data["id"])
-        block_reason = _shared_review_checkpoint_block_reason(
-            state,
-            cell,
-        )
+        aid = str(data.get("id", "") or "")
+        cell = state.agents.get(aid)
+        if not cell or getattr(cell, "deleted_at", 0) or not cell.worktree_path:
+            return {"type": "error", "id": aid,
+                    "message": "Agent has no active worktree"}
+        block_reason = _shared_review_checkpoint_block_reason(state, cell)
         if block_reason:
-            result = {"type": "error", "message": block_reason}
-        elif cell and cell.worktree_path:
-            msg = _checkpoint_message(cell)
-            await _checkpoint_worktree_with_submodules(cell, msg)
-            state._emit_agent(cell)
-            state._db_save_agent(cell)
+            return {"type": "error", "id": aid, "message": block_reason}
+        sha = await _checkpoint_worktree_with_submodules(
+            cell, _checkpoint_message(cell), raise_on_error=True)
+        state._emit_agent(cell)
+        state._db_save_agent(cell)
+        result = {"type": "worktree_checkpoint", "id": aid, "ok": True,
+                  "created": bool(sha), "sha": sha or "",
+                  "message": "Checkpoint created" if sha else "No changes to checkpoint"}
     elif cmd == "worktree_history":
         cell = state.agents.get(data.get("id", ""))
         commits = []
@@ -1044,12 +976,19 @@ async def handle_worktree_command(
             result = {"type": "worktree_rebase",
                       "id": aid, "error": "No worktree"}
     elif cmd == "worktree_rollback":
-        cell = state.agents.get(data.get("id", ""))
-        sha = data.get("sha", "")
-        if cell and cell.worktree_path and sha:
-            await worktree_mgr.rollback(cell, sha)
-            state._emit_agent(cell)
-            state._db_save_agent(cell)
+        aid = str(data.get("id", "") or "")
+        cell = state.agents.get(aid)
+        sha = str(data.get("sha", "") or "").strip()
+        if not cell or getattr(cell, "deleted_at", 0) or not cell.worktree_path or not sha:
+            return {"type": "error", "id": aid,
+                    "message": "Rollback requires an active worktree and checkpoint"}
+        if not await worktree_mgr.rollback(cell, sha):
+            return {"type": "error", "id": aid,
+                    "message": "Rollback failed; the selected checkpoint was not restored"}
+        state._emit_agent(cell)
+        state._db_save_agent(cell)
+        result = {"type": "worktree_rollback", "id": aid, "ok": True,
+                  "sha": sha, "message": "Checkpoint restored"}
     elif cmd == "worktree_diff":
         cell = state.agents.get(data.get("id", ""))
         await _reconcile_worktree_branch(state, worktree_mgr, cell)
@@ -1273,6 +1212,9 @@ async def handle_worktree_command(
                           "message": msg}
                 if getattr(cell, "driverless", False):
                     result["driverless"] = True
+        if result:
+            result["id"] = getattr(cell, "id", "") or str(data.get("id", "") or "")
+            result["ok"] = not bool(result.get("error"))
     elif cmd == "worktree_merge":
         target, live_cell, error_result = await _resolve_worktree_command_target_value(
             state=state,

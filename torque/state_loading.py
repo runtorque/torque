@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from .agent_order import ordered_terminal_children
+
 from .state import (
     ARCHIVED_LANE, AgentCell, AgentDigestSettings, AgentMessageLoop,
     AutoDispatchQueueEntry, BoardTask, EngineerSettings, GlobalSettings,
@@ -22,6 +24,7 @@ from .state import (
     normalize_guidance_hint_cadence, normalize_worktree_merge_cleanup,
 )
 from .state_settings import AgentSettings
+from .ui_preferences import normalize_react_workspace_state
 
 
 class StateLoadingMixin:
@@ -129,7 +132,7 @@ class StateLoadingMixin:
                     cell.parent_id = ""
                     if cell.group in self.groups:
                         self.groups[cell.group].append(aid)
-            self._rebuild_children()
+            self._rebuild_children(data.get("children"))
             # Global settings
             gs_raw = data.get("global_settings")
             if gs_raw:
@@ -305,6 +308,9 @@ class StateLoadingMixin:
                 )
             except (TypeError, ValueError):
                 self.context_panel_split_ratio = 0.38
+            self.react_workspace_state = normalize_react_workspace_state(
+                data.get("react_workspace_state")
+            )
             self.supervisor_panel_state = data.get(
                 "supervisor_panel_state", {}
             ) or {}
@@ -562,12 +568,6 @@ class StateLoadingMixin:
         for agent_id, task in candidates.items():
             self.agents[agent_id].current_task_id = task.id
 
-    def _rebuild_children(self):
-        """Rebuild the parent→children index from parent_id fields."""
-        self._children = {}
-        for aid, cell in self.agents.items():
-            if cell.cell_type == "agent":
-                self._children.setdefault(aid, [])
-        for aid, cell in self.agents.items():
-            if cell.parent_id and cell.parent_id in self._children:
-                self._children[cell.parent_id].append(aid)
+    def _rebuild_children(self, saved_order=None):
+        """Rebuild relationships and apply only valid persisted child ranks."""
+        self._children = ordered_terminal_children(self.agents, saved_order)

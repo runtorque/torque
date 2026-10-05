@@ -84,6 +84,7 @@ EXPECTED_UI_STATE_COMMANDS = {
     "ui_set_engineer_panel_split",
     "ui_set_context_panel_split",
     "ui_set_supervisor_panel_state",
+    "ui_set_react_workspace_state",
     "events_dismiss",
     "mission_control_dismiss",
     "board_set_filters",
@@ -143,6 +144,7 @@ EXPECTED_WORKTREE_COMMANDS = {
     "worktree_advance_boundary",
     "worktree_adopt",
     "worktree_remove",
+    "worktree_remove_preview",
     "worktree_list",
     "worktree_prune",
     "worktree_checkpoint",
@@ -438,6 +440,45 @@ class UIStateCommandModuleTests(unittest.TestCase):
             self.commands._UI_STATE_COMMAND_REGISTRY.route_names(),
         )
 
+    def test_supervisor_started_sort_survives_persistence(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+
+        state = SimpleNamespace(_emit=Mock(), _db_save_ui=Mock())
+        self.commands._handle_ui_state_command({
+            "cmd": "ui_set_supervisor_panel_state",
+            "state": {"sortKey": "started_at", "sortDirection": "desc"},
+        }, state)
+        self.assertEqual(state.supervisor_panel_state["sortKey"], "started_at")
+        self.assertEqual(state.supervisor_panel_state["sortDirection"], "desc")
+        state._db_save_ui.assert_called_once()
+
+    def test_native_bounds_keep_pixel_units_and_geometry_after_release(self):
+        import json
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+
+        state = SimpleNamespace(window_bounds={}, detached_panels={},
+                                _emit=Mock(), _db_save_ui=Mock())
+        bounds = {"x": 924, "y": 420, "width": 1952, "height": 1308,
+                  "physical": True, "display_id": "Retina"}
+        self.commands._handle_ui_state_command({
+            "cmd": "ui_set_detached_panel_bounds", "panel": "agents",
+            "label": "native-1", "bounds": bounds,
+        }, state)
+        self.assertEqual(state.detached_panels["agents"]["bounds"], bounds)
+        self.commands._handle_ui_state_command({
+            "cmd": "ui_set_detached_panels", "detached_panels": {
+                "agents": {"label": "", "bounds": bounds},
+            },
+        }, state)
+        persisted = json.loads(state._db_save_ui.call_args.args[1])
+        self.assertEqual(persisted["agents"], {"label": "", "bounds": bounds})
+        self.commands._handle_ui_state_command({
+            "cmd": "ui_set_window_bounds", "window": "main", "bounds": bounds,
+        }, state)
+        self.assertTrue(state.window_bounds["main"]["physical"])
+
     def test_server_preserves_ui_state_compatibility_exports(self):
         self.assertIs(
             self.commands._handle_ui_state_command,
@@ -500,6 +541,32 @@ class ScheduleCommandModuleTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(1, len(listed["schedules"]))
 
+
+    async def test_run_dispatches_and_records_schedule_through_injected_callbacks(self):
+        from unittest.mock import AsyncMock, Mock
+        state = importlib.import_module("torque.state").MatrixState()
+        state.groups["Torque"] = []
+        schedule = state.schedule_add(
+            "Review", "Torque", task_template="Review {date}",
+            description="Scheduled context", action_name="review",
+            action_vars={"SCOPE": "repo"}, labels=["scheduled"],
+        )
+        dispatch = AsyncMock(return_value=None)
+        event = Mock()
+        result = await self.commands._handle_schedule_command(
+            {"cmd": "schedule_run", "id": schedule.id}, state,
+            dispatch_command=dispatch, panel_event=event,
+        )
+        self.assertEqual("ok", result["type"])
+        task = state.board_tasks[result["task_id"]]
+        dispatch.assert_awaited_once_with({"cmd": "dispatch_task", "id": task.id, "create_agent": True})
+        self.assertEqual(schedule.last_task_id, task.id)
+        self.assertEqual(schedule.run_count, 1)
+        self.assertTrue(schedule.last_run_at)
+        self.assertNotIn("{date}", task.task)
+        self.assertEqual(task.action_vars, {"SCOPE": "repo"})
+        self.assertEqual(task.description, "Scheduled context")
+        event.assert_called_once_with("schedule_fired", "", "Review", "Torque", task.task, task_id=task.id)
 
 class AgentClassCommandModuleTests(unittest.TestCase):
     @classmethod

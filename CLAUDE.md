@@ -2,7 +2,7 @@
 
 ## Project overview
 
-Torque is a local agent-orchestration workspace: a long-running Python daemon, a PTY-backed terminal runtime, a no-build-step HTML/CSS/JS frontend, and SQLite as the persistent source of truth. The product center of gravity is `torque/server.py` plus `torque/state.py`; most other modules hang off those.
+Torque is a local agent-orchestration workspace: a long-running Python daemon, a PTY-backed terminal runtime, a primary React/TypeScript frontend, a temporary classic HTML/CSS/JS fallback, and SQLite as the persistent source of truth. The product center of gravity is `torque/server.py` plus `torque/state.py`; most other modules hang off those.
 
 Primary operator surfaces are standalone/browser and desktop app modes. The old Toolbelt integration is decommissioned; the Makefile no longer installs or updates the old Scripts copy, and old data should be migrated with `scripts/migrate_toolbelt_to_profile.py`.
 
@@ -15,6 +15,8 @@ make standalone      # Foreground browser-only daemon (then make open)
 make stop            # Free TORQUE_PORT (18932 unless overridden)
 make check           # Python path, dependency, install status
 make open            # Open standalone/browser UI
+make ui-dev          # Run the React/Vite UI against an isolated daemon
+make ui-check        # Lint, typecheck, test, and build the React UI
 make test            # Full regression suite
 ```
 
@@ -55,7 +57,8 @@ See [docs/reference/architecture.md](docs/reference/architecture.md) for the det
 - `torque/mcp*.py`, `mcp_engineer_tools/`: worker, engineer, architect MCP transport/tool specifications around the scoped implementation.
 - `torque/engineer.py`, `architect.py`: persistent role prompts, journals/digests/decisions, orchestration behavior.
 - `torque/adapters/`: provider integrations (`claude-code`, `codex`, `gemini-cli`, generic).
-- `webview.html` + `static/js/*` + `static/style.css`: plain frontend; script load order is architectural.
+- `ui/`: primary React/TypeScript/Vite frontend. `/` serves its production build and `/ui-next/` remains a compatibility alias.
+- `webview.html` + `static/js/*` + `static/style.css`: temporary classic fallback at `/legacy/`; script load order remains architectural during burn-in.
 - `bin/torque`: CLI; writes go through HTTP, many reads go directly to SQLite.
 
 ## Persistence and state
@@ -105,9 +108,10 @@ Workers should not ask the user directly. Use `user_ask` only for blocking human
 ## Code conventions
 
 - Python: no framework beyond aiohttp and the standard-library PTY/subprocess stack. State mutations should go through `MatrixState` methods, which emit deltas and targeted DB writes. Direct cell mutations from the PTY runtime, events, or server handlers must call `state._emit_agent(cell)` and `state._db_save_agent(cell)` unless only ephemeral fields changed. Catch and log expected runtime errors; never use bare `except: pass`.
-- JS: no framework, no TypeScript, no build step. `webview.html` script order matters (core globals first, then board/modal submodules, then feature panels). State is patched in place from WS deltas.
+- Classic fallback JS: no framework, no TypeScript, no build step. `webview.html` script order matters (core globals first, then board/modal submodules, then feature panels). State is patched in place from WS deltas; removal requires the Phase 6 retirement gate.
+- React UI: TypeScript, React, Redux Toolkit, and Vite live under `ui/`. Keep protocol, host, app, design, extension, and feature boundaries separate; Tauri imports belong only in `ui/src/host/tauri.ts`. Use the committed npm lockfile and the workflows in `ui/README.md`.
 - Live frontend panels must preserve operator state across routine rerenders: scroll/viewport anchor, hover/focus/caret, inline drafts, expanded sections, and selection. Prefer shared capture/restore helpers in `static/js/render.js` and add Node frontend regression coverage for rerender-stability fixes.
-- CSS: single stylesheet, CSS custom properties for theming, monospace throughout.
+- CSS: the classic UI retains its single stylesheet. The React UI uses a global token/reset layer plus CSS Modules and must not import the classic stylesheet wholesale.
 - `DESIGN.md` is the maintained source of truth for UI principles, tokens, component standards, and durable design decisions. UI changes must reuse its rules or update the relevant standard and decision log alongside the implementation.
 - Use custom modal/context-menu flows instead of native blocking dialogs so desktop and browser behavior stays consistent.
 

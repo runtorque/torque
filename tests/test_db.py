@@ -3927,7 +3927,9 @@ class TorqueDBTests(unittest.TestCase):
         ).fetchone()
         self.assertEqual(panel_row[0], "engineer")
 
-    def test_engineer_settings_load_backfills_heartbeat_from_legacy_rows(self):
+    def test_engineer_settings_load_respects_current_schema_heartbeat_default(self):
+        # Omitting a column in the current schema uses its SQL default; it is
+        # not evidence that a row predates the heartbeat-column migration.
         self.db._conn.execute(
             """
             INSERT INTO engineer_settings
@@ -3953,7 +3955,7 @@ class TorqueDBTests(unittest.TestCase):
         loaded = self.db.load_engineer_settings("legacy")
 
         self.assertEqual(loaded["max_interval"], 240)
-        self.assertEqual(loaded["heartbeat_interval"], 240)
+        self.assertEqual(loaded["heartbeat_interval"], 300)
         self.assertEqual(loaded["default_worker_concurrency"], 2)
         self.assertFalse(loaded["restrict_to_created_agents"])
         self.assertEqual(loaded["autonomy_mode"], "dispatch_when_clear")

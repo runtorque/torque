@@ -3302,6 +3302,31 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sent, [('session-1', 'line one\nline two')])
         self.assertEqual(len(state.agent_message_history_read(worker.id)), 1)
 
+    async def test_send_user_message_session_replacement_during_broadcast_never_receives_draft(self):
+        state = self._make_state()
+        worker = self.state_mod.AgentCell(id='agent-1', name='Worker', group='g',
+                                         cell_type='agent', session_id='session-1', status='idle')
+        state.agents[worker.id] = worker
+        state.groups['g'] = [worker.id]
+        sent = []
+
+        async def replace_session():
+            worker.session_id = 'session-2'
+            worker.status = 'idle'
+
+        class Bridge:
+            async def send_text(self, session_id, text):
+                sent.append((session_id, text))
+
+        state.broadcast = replace_session
+        with self.assertRaisesRegex(RuntimeError, 'session changed'):
+            await self.server_mod._handle_send_user_message_command(
+                {'cell_id': worker.id, 'session_id': 'session-1', 'text': 'private draft'}, state, Bridge())
+        self.assertEqual(sent, [])
+        self.assertEqual(state.agent_message_history_read(worker.id), [])
+        self.assertEqual(worker.status, 'idle')
+        self.assertEqual(worker.session_id, 'session-2')
+
     async def test_send_user_message_failure_restores_progress_clocks(self):
         state = self._make_state()
         worker = self.state_mod.AgentCell(
@@ -4278,6 +4303,33 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
             ]),
             ['failed', 'requested'],
         )
+
+    async def test_user_agent_loop_cancel_checks_displayed_loop_before_mutating(self):
+        state = self._make_state()
+        worker = self.state_mod.AgentCell(id='agent-loop', name='Worker', group='g', cell_type='agent', kind='worker')
+        state.agents[worker.id] = worker
+        state.groups['g'] = [worker.id]
+        first = state.agent_message_loop_add(agent_id=worker.id, group_name='g', interval_seconds=600, message='First')
+        state.agent_message_loop_stop(first.id)
+        replacement = state.agent_message_loop_add(agent_id=worker.id, group_name='g', interval_seconds=600, message='Replacement')
+        send = mock.AsyncMock()
+        stale = await self.server_mod._handle_user_agent_message_command(
+            {'agent_id': worker.id, 'message': '/loop cancel', 'expected_loop_id': first.id}, state, send)
+        self.assertEqual(stale['type'], 'error')
+        self.assertIn('no longer active', stale['message'])
+        self.assertEqual(replacement.status, 'active')
+        self.assertEqual(self.db.load_direct_messages_for_agent(worker.id), [])
+        self.assertEqual(self.db.load_agent_message_loops()[replacement.id]['status'], 'active')
+        matched = await self.server_mod._handle_user_agent_message_command(
+            {'agent_id': worker.id, 'message': '/loop cancel', 'expected_loop_id': replacement.id}, state, send)
+        self.assertEqual(matched['loop']['id'], replacement.id)
+        self.assertEqual(matched['loop']['status'], 'cancelled')
+        self.assertTrue(matched['audit_message_id'])
+        self.assertEqual(len(self.db.load_direct_messages_for_agent(worker.id)), 1)
+        absent = await self.server_mod._handle_user_agent_message_command(
+            {'agent_id': worker.id, 'message': '/loop cancel', 'expected_loop_id': replacement.id}, state, send)
+        self.assertEqual(absent['type'], 'error')
+        send.assert_not_awaited()
 
     async def test_user_agent_loop_create_fire_cancel_and_invalid_no_spam(self):
         state = self._make_state()

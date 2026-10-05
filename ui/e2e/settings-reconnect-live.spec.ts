@@ -1,0 +1,54 @@
+import { expect, test, type APIRequestContext, type WebSocketRoute } from '@playwright/test';
+type Row = Record<string, unknown>;
+async function command(request: APIRequestContext, data: Row) {
+  const result = await (await request.post('/api/cmd', { data })).json() as { ok: boolean; error?: string; data: Row };
+  expect(result.ok, result.error).toBe(true); return result.data;
+}
+test('Settings reconnect reconciles untouched fields and retains edits, caret, map removals and staged resets', async ({ page, request }) => {
+  const runtime = await (await request.get('/api/runtime')).json() as { data: { runtime: { port: number; profile: string } } };
+  expect(runtime.data.runtime.port).not.toBe(18932); expect(runtime.data.runtime.profile).not.toBe('default');
+  const group = `Reconnect settings ${Date.now()}`;
+  await command(request, { cmd: 'add_group', group }); await command(request, { cmd: 'ui_select_group', group });
+  await command(request, { cmd: 'update_global_settings', settings: { xterm_scrollback: 2000, event_ingest_max_days: 14 } });
+  await command(request, { cmd: 'update_group_settings', group, settings: { max_agents: 3, default_directory: '/private/tmp', env_vars: { EDITED: 'original', REMOVED: 'original' } } });
+  let socket: WebSocketRoute | undefined; let connections = 0; let fail = false; let reads = 0;
+  await page.routeWebSocket(/\/ws\?/, (connection) => { connection.connectToServer(); socket = connection; connections += 1; });
+  const reconnect = async () => { const before = connections; await socket!.close({ code: 1012, reason: 'Settings reconnect regression' }); await expect.poll(() => connections).toBeGreaterThan(before); };
+  await page.route('**/api/cmd', async (route) => {
+    const data = route.request().postDataJSON() as Row;
+    if (['get_global_settings', 'get_group_settings', 'get_ai_settings'].includes(String(data.cmd))) reads += 1;
+    if (fail && data.cmd === 'get_group_settings') await route.fulfill({ json: { ok: false, error: 'Injected refresh failure' } });
+    else await route.continue();
+  });
+  await page.goto('/'); await page.getByRole('button', { name: /◎ Control/ }).click(); await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  const directory = page.getByRole('textbox', { name: 'Default directory', exact: true }); const maximum = page.getByRole('spinbutton', { name: 'Maximum agents', exact: true });
+  await expect(maximum).toHaveValue('3'); await directory.fill('/private/tmp/local-draft');
+  await page.getByRole('spinbutton', { name: 'Terminal scrollback', exact: true }).fill('9200');
+  await page.getByText(`${group} execution, worktrees, notifications and sync`, { exact: true }).click();
+  await page.getByRole('textbox', { name: 'Env vars: EDITED', exact: true }).fill('local value');
+  await page.getByRole('button', { name: 'Remove Env vars: REMOVED', exact: true }).click();
+  await page.getByText('Engineer behavior defaults', { exact: true }).click();
+  await page.getByRole('button', { name: 'Reset Engineer defaults', exact: true }).click();
+  const concurrency = page.getByRole('combobox', { name: 'Default worker concurrency', exact: true }); const resetConcurrency = await concurrency.inputValue();
+  await command(request, { cmd: 'update_global_settings', settings: { xterm_scrollback: 8000, event_ingest_max_days: 21 } });
+  await command(request, { cmd: 'update_group_settings', group, settings: { max_agents: 9, default_directory: '/private/tmp/server', env_vars: { EDITED: 'remote value', REMOVED: 'remote value', NEW: 'new remote value' } } });
+  await command(request, { cmd: 'engineer_update_settings', group, default_worker_concurrency: 5 });
+  await directory.focus(); await directory.evaluate((input: HTMLInputElement) => { input.setSelectionRange(2, 10); input.dataset.reconnectAnchor = 'original'; });
+  const initialReads = reads; await reconnect();
+  await expect(maximum).toHaveValue('9'); expect(reads - initialReads).toBe(3);
+  await expect(directory).toHaveValue('/private/tmp/local-draft'); await expect(directory).toBeFocused(); await expect(directory).toHaveAttribute('data-reconnect-anchor', 'original');
+  expect(await directory.evaluate((input: HTMLInputElement) => [input.selectionStart, input.selectionEnd])).toEqual([2, 10]);
+  await expect(page.getByRole('spinbutton', { name: 'Terminal scrollback', exact: true })).toHaveValue('9200'); await expect(concurrency).toHaveValue(resetConcurrency);
+  await expect(page.getByRole('textbox', { name: 'Env vars: EDITED', exact: true })).toHaveValue('local value'); await expect(page.getByRole('textbox', { name: 'Env vars: NEW', exact: true })).toHaveValue('new remote value'); await expect(page.getByRole('textbox', { name: 'Env vars: REMOVED', exact: true })).toHaveCount(0);
+  await command(request, { cmd: 'update_group_settings', group, settings: { max_agents: 11 } }); fail = true; await reconnect();
+  await expect(page.getByRole('alert')).toContainText('Settings refresh failed'); await expect(maximum).toHaveValue('9'); await expect(directory).toHaveValue('/private/tmp/local-draft');
+  fail = false; await page.getByRole('button', { name: 'Retry settings', exact: true }).click(); await expect(maximum).toHaveValue('11'); await expect(page.getByRole('alert')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Save changes', exact: true }).click(); await expect(page.getByText('Saved', { exact: true })).toBeVisible();
+  const saved = await command(request, { cmd: 'get_group_settings', group });
+  expect(saved.settings).toMatchObject({ max_agents: 11, default_directory: '/private/tmp/local-draft', env_vars: { EDITED: 'local value', NEW: 'new remote value' } });
+  expect((saved.settings as Row).env_vars).not.toHaveProperty('REMOVED'); expect(saved.engineer_settings).toMatchObject({ default_worker_concurrency: Number(resetConcurrency) });
+  expect((await command(request, { cmd: 'get_global_settings' })).settings).toMatchObject({ xterm_scrollback: 9200, event_ingest_max_days: 21 });
+  await directory.scrollIntoViewIfNeeded(); await page.screenshot({ path: test.info().outputPath('settings-reconnect.png'), fullPage: true });
+  await page.getByRole('button', { name: 'Mission Control', exact: true }).click(); const hiddenReads = reads;
+  await reconnect(); expect(reads).toBe(hiddenReads);
+});

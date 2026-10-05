@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from .services.creation_outcomes import record_creation_target
+
 from .state import (
     AGENT_TOMBSTONE_RETENTION_SECONDS,
     AI_DEFAULT_EMBEDDING_MODEL,
@@ -619,9 +621,7 @@ class StateLifecycleMixin:
         # Max agents cap
         if cell_type == "agent" and not parent_id:
             if gs.max_agents > 0:
-                current = sum(1 for aid in self.groups.get(group, [])
-                              if self.agents.get(aid)
-                              and self.agents[aid].cell_type == "agent")
+                current = self.group_agent_count(group)
                 if current >= gs.max_agents:
                     log.warning("Group '%s' at max_agents cap (%d)",
                                 group, gs.max_agents)
@@ -649,6 +649,7 @@ class StateLifecycleMixin:
             icon=icon,
             parent_id=parent_id,
         )
+        record_creation_target("agent", aid)
         self.agents[aid] = cell
         if parent_id:
             self._children.setdefault(parent_id, []).append(aid)
@@ -1150,7 +1151,7 @@ class StateLifecycleMixin:
             children.append(aid)
         # Children order is derived from _children, emit parent for rebuild
         self._emit_agent(self.agents[parent_id])
-        # Children order is in-memory only (_children), group_members tracks it
+        # Root and child order are persisted together by the group writer.
         self._db_save_groups()
 
     def reparent_terminal(self, aid: str, new_parent_id: str):

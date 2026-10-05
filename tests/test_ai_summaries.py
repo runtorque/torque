@@ -562,6 +562,38 @@ class AISummaryMCPToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("interrupted", marked["error"])
         self.assertEqual(fake.calls, [])
 
+    async def test_boot_summary_setting_disables_reads_and_resumes_generation(self):
+        fake = FakeSummarizer(LLMResult(
+            provider="anthropic", model="claude-summary-test",
+            text="Enabled summary", usage=LLMUsage(),
+        ))
+        service = AISummaryService(
+            db=self.db, state=self.state, summarize_func=fake,
+            debounce_seconds=0.01,
+        )
+        self.state.ai_summary_service = service
+        self._seed_architect_stale_summary(service)
+        key = architect_boot_summary_key(self.architect.id)
+        for enabled in [False, True, False]:
+            self.state.update_global_settings(ai_boot_summary_enabled=enabled)
+            payload = cached_boot_summary_payload(
+                self.state, "architect", self.architect.id,
+            )
+            if not enabled:
+                self.assertEqual(payload["status"], "empty")
+                self.assertEqual(payload["summary"], "")
+                self.assertIn("disabled", payload["message"])
+                before = len(fake.calls)
+                await self._drain_read_tasks(service)
+                self.assertEqual(len(fake.calls), before)
+            else:
+                await self._drain_read_tasks(service)
+                self.assertEqual(len(fake.calls), 1)
+                self.assertEqual(self.db.ai_load_summary(key)["summary_text"],
+                                 "Enabled summary")
+        self.assertEqual(self.db.ai_load_summary(key)["summary_text"],
+                         "Enabled summary")
+
     async def test_two_stale_reads_inside_min_interval_make_one_provider_call(self):
         self.state.global_settings.ai_boot_summary_min_interval_seconds = 600
         fake = FakeSummarizer(LLMResult(

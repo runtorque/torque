@@ -36,6 +36,12 @@ tests/perf/runs/
 # Rust/Tauri build output
 src-tauri/target/
 src-tauri/gen/
+ui/node_modules/
+ui/dist/
+ui/coverage/
+ui/playwright-report/
+ui/test-results/
+ui/*.tsbuildinfo
 .torque/worktrees/
 
 # Pre-profile runtime artifacts from source-adjacent launches.

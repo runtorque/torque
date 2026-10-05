@@ -53,6 +53,7 @@ from .config import (
     log,
 )
 from .db import TorqueDB, canonical_user_agent_thread_id
+from .terminal_adapter import TerminalInputUnavailableError
 from .daemon_owner import ProfileDaemonOwner
 from .deploy_state import architect_deploy_state_payload, capture_deploy_boot_state
 from .mission_control import build_mission_control_summary
@@ -446,6 +447,7 @@ from .commands.ai_reports import (
     TORQUE_AI_MCP_REPORT_TOOL_NAMES as _TORQUE_AI_MCP_REPORT_TOOL_NAMES,
     handle_ai_report_command,
 )
+from .commands.worktree_removal import clear_worktree_tracking as _clear_worktree_tracking
 from .commands.worktrees import (
     WORKTREE_COMMAND_NAMES,
     WorktreeCommandRuntime,
@@ -786,6 +788,8 @@ def _runtime_payload(*, bridge=None, state=None) -> dict:
         "terminal_backend": "pty",
         "home_directory": str(Path.home()),
         "profile": os.environ.get("TORQUE_PROFILE", "").strip(),
+        "ui_default": torque_config.UI_DEFAULT,
+        "legacy_ui_path": "/legacy/",
         "data_dir": str(DATA_DIR),
         "port": WS_PORT,
         "default_command": default_command,
@@ -1953,6 +1957,10 @@ async def _handle_send_user_message_command(data, state: MatrixState,
     cell = state.agents.get(cell_id)
     if not cell or not getattr(cell, "session_id", ""):
         return False
+    session_id = cell.session_id
+    expected_session = str(data.get("session_id", "") or "")
+    if expected_session and expected_session != session_id:
+        return False
     optimistic_baseline = state.snapshot_agent_optimistic_state(cell)
     optimistic_at = time.time()
     optimistic_marked = state.mark_agent_optimistic_running(
@@ -1964,10 +1972,17 @@ async def _handle_send_user_message_command(data, state: MatrixState,
     if optimistic_marked:
         await state.broadcast()
     try:
-        await bridge.send_text(cell.session_id, text)
+        if state.agents.get(cell_id) is not cell or cell.session_id != session_id:
+            raise TerminalInputUnavailableError("The terminal session changed before delivery. Review the draft before retrying.")
+        delivered = await bridge.send_text(session_id, text)
+        if delivered is False:
+            raise TerminalInputUnavailableError(
+                "The terminal session is unavailable. No message was sent.")
     except Exception:
         if (
             optimistic_marked
+            and state.agents.get(cell_id) is cell
+            and cell.session_id == session_id
             and getattr(cell, "status", "") == "running"
             and not getattr(cell, "activity", "")
             and float(getattr(cell, "last_progress_at", 0) or 0) <= optimistic_at
@@ -1998,15 +2013,15 @@ async def _handle_user_agent_message_command(data, state: MatrixState,
     if not target or getattr(target, "cell_type", "") != "agent":
         return {
             "type": "error",
-            "message": f"Agent not found: {target_ident}",
+            "message": f"Agent not found: {target_ident}", "delivery_refused": True,
         }
     message_text = str(data.get("message") or data.get("text") or "")
     if not message_text.strip():
-        return {"type": "error", "message": "Message is required"}
+        return {"type": "error", "message": "Message is required", "delivery_refused": True}
     if not getattr(state, "db", None):
         return {
             "type": "error",
-            "message": "Direct message store is unavailable",
+            "message": "Direct message store is unavailable", "delivery_refused": True,
         }
     stripped_message = message_text.strip()
     command = parse_user_dm_command(stripped_message)
@@ -2139,20 +2154,20 @@ async def _handle_user_agent_turn_cancel_command(data, state: MatrixState,
     target_id = _resolve_agent_id(state, str(data.get("agent_id") or "").strip())
     target = state.get_active_agent(target_id) if target_id else None
     if not target or getattr(target, "cell_type", "") != "agent":
-        return {"type": "error", "message": "Agent is no longer available"}
+        return {"type": "error", "message": "Agent is no longer available", "delivery_refused": True}
     session_id = str(data.get("session_id") or "").strip()
     source_key = str(data.get("turn_idempotency_key") or "").strip()
     cancel_key = _user_agent_message_idempotency_key(data)
     message_id = _user_direct_message_id_from_idempotency_key(source_key)
     if not session_id or not message_id or not cancel_key:
-        return {"type": "error", "message": "A current submitted message is required"}
+        return {"type": "error", "message": "A current submitted message is required", "delivery_refused": True}
     source = state.db.load_direct_message(message_id) if getattr(state, "db", None) else None
     if not source or (
             str(source.get("sender_kind", "")) != "user"
             or str(source.get("recipient_id", "")) != target.id
             or str(source.get("idempotency_key", "")) != source_key
             or str(source.get("message_type", "")) not in {"message", "slash_command"}):
-        return {"type": "error", "message": "That submitted message is not cancellable"}
+        return {"type": "error", "message": "That submitted message is not cancellable", "delivery_refused": True}
     audit_id = _user_direct_message_id_from_idempotency_key(cancel_key)
     existing = state.db.load_direct_message(audit_id)
     if existing:
@@ -2160,7 +2175,9 @@ async def _handle_user_agent_turn_cancel_command(data, state: MatrixState,
         if (str(existing.get("sender_kind", "")) != "system"
                 or str(snapshot.get("cancelled_message_id", "")) != message_id
                 or str(snapshot.get("cancel_session_id", "")) != session_id):
-            return {"type": "error", "message": "Cancellation retry key conflicts"}
+            return {"type": "error", "message": "Cancellation retry key conflicts", "delivery_refused": True}
+        if snapshot.get("cancel_outcome") == "interrupt_unknown":
+            return {"type": "error", "message": "Could not confirm interruption. Check the terminal before submitting another cancellation.", "delivery_uncertain": True}
         return {"type": "ok", "outcome": snapshot.get("cancel_outcome", "no_active_turn"),
                 "message_id": audit_id, "deduped": True}
     cancel = getattr(send_prompt, "cancel_user_direct_turn", None)
@@ -2176,6 +2193,7 @@ async def _handle_user_agent_turn_cancel_command(data, state: MatrixState,
         "session_replaced": "The target session changed; no turn was interrupted.",
         "no_active_turn": "No active turn remains for that submitted message.",
         "interrupt_failed": "Could not interrupt the active turn; it was left unchanged.",
+        "interrupt_unknown": "Could not confirm interruption. Check the terminal before submitting another cancellation.",
     }
     if outcome == "cancelled_queued":
         state.update_direct_message_delivery(message_id, "cancelled",
@@ -2189,6 +2207,8 @@ async def _handle_user_agent_turn_cancel_command(data, state: MatrixState,
     )
     if not audit:
         return {"type": "error", "message": "Failed to record cancellation outcome"}
+    if outcome == "interrupt_unknown":
+        return {"type": "error", "message": labels[outcome], "delivery_uncertain": True}
     return {"type": "ok", "outcome": outcome, "message_id": audit_id,
             "deduped": False}
 
@@ -3261,6 +3281,8 @@ def _build_worktree_command_runtime(
         target_has_driverless_payload=_target_has_driverless_payload,
         untracked_overwrite_message=_untracked_overwrite_message,
         workflow_breach_active_task_for_worker=_workflow_breach_active_task_for_worker,
+        worktree_removal_refusal_reason=_worktree_removal_refusal_reason,
+        worktree_path_contains=_worktree_path_contains,
         worktree_full_diff=_worktree_full_diff,
         worktree_merge_error=_worktree_merge_error,
         worktree_merge_requested_cleanup=_worktree_merge_requested_cleanup,
@@ -3538,19 +3560,6 @@ async def main(connection=None):
             "mismatches": [],
         }
 
-    def _clear_worktree_tracking(cell) -> None:
-        cell.worktree_path = ""
-        cell.worktree_branch = ""
-        cell.worktree_base_branch = ""
-        cell.worktree_repo_root = ""
-        cell.worktree_dirty = False
-        cell.worktree_diff = {}
-        cell.worktree_changed_files = []
-        cell.worktree_checkpoints = 0
-        cell.worktree_ahead = 0
-        cell.worktree_behind = 0
-        cell.worktree_merged = False
-
     def _worktree_submodules_for_cell(cell) -> list[str]:
         if not cell:
             return []
@@ -3560,15 +3569,18 @@ async def main(connection=None):
         except Exception:
             return []
 
-    async def _checkpoint_worktree_with_submodules(cell, message: str = ""):
+    async def _checkpoint_worktree_with_submodules(
+            cell, message: str = "", *, raise_on_error: bool = False):
+        strict = {"raise_on_error": True} if raise_on_error else {}
         submodules = _worktree_submodules_for_cell(cell)
         if submodules:
             return await worktree_mgr.checkpoint(
                 cell,
                 message=message,
                 worktree_submodules=submodules,
+                **strict,
             )
-        return await worktree_mgr.checkpoint(cell, message=message)
+        return await worktree_mgr.checkpoint(cell, message=message, **strict)
 
     async def _safe_remove_worktree_result(
             cell, *, merge_commit_sha: str = "",
@@ -5791,6 +5803,8 @@ async def main(connection=None):
         ui_client_id_from_request=_ui_client_id_from_request,
     )
     handle_index = http_routes.handle_index
+    handle_legacy = http_routes.handle_legacy
+    handle_react_ui = http_routes.handle_react_ui
     handle_ws = http_routes.handle_ws
     handle_terminal_ws = http_routes.handle_terminal_ws
     handle_api_cmd = http_routes.handle_api_cmd
@@ -5811,6 +5825,12 @@ async def main(connection=None):
 
     app_server = web.Application()
     app_server.router.add_get("/", handle_index)
+    app_server.router.add_get("/assets/{path:.*}", handle_index)
+    app_server.router.add_get("/legacy", handle_legacy)
+    app_server.router.add_get("/legacy/", handle_legacy)
+    app_server.router.add_get("/ui-next", handle_react_ui)
+    app_server.router.add_get("/ui-next/", handle_react_ui)
+    app_server.router.add_get("/ui-next/{path:.*}", handle_react_ui)
     app_server.router.add_get("/api/runtime", http_routes.handle_runtime)
     app_server.router.add_get("/ws", handle_ws)
     app_server.router.add_get("/ws/terminal/{cell_id}", handle_terminal_ws)

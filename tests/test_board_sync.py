@@ -423,6 +423,26 @@ class GitHubPushTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(commands[5][0:2], ["project", "item-add"])
         self.assertEqual(commands[6][0:2], ["project", "item-edit"])
 
+    async def test_saved_assignee_map_controls_actual_issue_creation_arguments(self):
+        for mapping in [{"worker-1": "octocat"}, {}]:
+            with self.subTest(mapping=mapping):
+                task = BoardTask(id="assignee-policy", task="Assign", agent_id="worker-1")
+                settings = github_settings(board_sync_github={"github_assignee_map": mapping})
+                runner = FakeGhRunner([
+                    gh_ok("https://github.com/owner/repo/issues/123\n"),
+                    gh_ok(issue_view(body=render_issue_body(task))),
+                    gh_ok(project_view()), gh_ok(field_list()),
+                    gh_ok({"id": "PVTI_kw"}),
+                ])
+                result = await GitHubBoardSyncProvider(runner).push_task(task, settings)
+                self.assertEqual(result["sync_state"], "idle")
+                command = runner.calls[0][0]
+                self.assertEqual(command[:2], ["issue", "create"])
+                if mapping:
+                    self.assertEqual(command[command.index("--assignee") + 1], "octocat")
+                else:
+                    self.assertNotIn("--assignee", command)
+
     async def test_push_issue_view_uses_valid_gh_json_fields(self):
         task = BoardTask(
             id="T:valid-fields",

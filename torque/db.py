@@ -956,23 +956,28 @@ class TorqueDB(
         self,
         groups: dict,
         slugs: dict | None = None,
+        children: dict | None = None,
     ) -> None:
-        """Persist groups plus each group's ordered membership list."""
+        """Persist root membership and optional terminal-child ordering."""
         self.save_groups(groups, slugs)
         for group_name, members in (groups or {}).items():
             self.save_group_members(group_name, members)
+        if children is not None:
+            self.save_ui_state("children", json.dumps(children))
 
     def save_groups_and_members_deferred(
         self,
         groups: dict,
         slugs: dict | None = None,
+        children: dict | None = None,
     ) -> None:
-        """Persist groups/members off-loop when called from asyncio code."""
+        """Persist group and child order off-loop with one captured payload."""
         self.defer_write(
             "groups",
             "save_groups_and_members",
             groups,
             slugs or {},
+            children,
             snapshot_args=True,
         )
 
@@ -1268,20 +1273,6 @@ class TorqueDB(
             if item["id"]:
                 loops[item["id"]] = item
         return loops
-
-    def save_ui_state(self, key: str, value):
-        self._conn.execute(
-            "INSERT OR REPLACE INTO ui_state (key, value) VALUES (?,?)",
-            (key, str(value)))
-        self._conn.commit()
-
-    def load_ui_state_value(self, key: str) -> str | None:
-        """Return one ui_state value, or None when the key is unset."""
-        row = self._conn.execute(
-            "SELECT value FROM ui_state WHERE key=?",
-            (key,),
-        ).fetchone()
-        return row[0] if row else None
 
     def save_global_settings(self, gs):
         """Persist global settings as key-value pairs."""

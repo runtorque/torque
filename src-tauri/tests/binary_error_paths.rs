@@ -170,6 +170,14 @@ fn write_fake_daemon_script(
 import json
 import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from socketserver import TCPServer
+
+class LocalHTTPServer(ThreadingHTTPServer):
+    def server_bind(self):
+        # These loopback fixtures do not need HTTPServer's reverse DNS lookup.
+        TCPServer.server_bind(self)
+        self.server_name = "localhost"
+        self.server_port = self.server_address[1]
 
 CHILD_PID_FILE = {child_pid_file:?}
 PORT = {port}
@@ -210,7 +218,7 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
+LocalHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
 "#,
         child_pid_file = child_pid_file.display().to_string(),
         data_dir = data_dir.display().to_string(),

@@ -28,6 +28,11 @@ except ImportError:
 # ---------------------------------------------------------------------------
 
 def _yaml_parse_value(raw):
+    # PyYAML emits empty collections in flow style even for block documents.
+    if raw == "[]":
+        return []
+    if raw == "{}":
+        return {}
     if raw == "" or raw == "~" or raw == "null":
         return None
     if raw in ("true", "True"):
@@ -43,7 +48,25 @@ def _yaml_parse_value(raw):
     except ValueError:
         pass
     if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in ('"', "'"):
-        return raw[1:-1]
+        if raw[0] == "'":
+            return raw[1:-1].replace("''", "'")
+        # Serializer-quoted scalars use YAML escapes, including non-BMP Unicode.
+        escapes = {"0": "\0", "a": "\a", "b": "\b", "t": "\t", "n": "\n",
+                   "v": "\v", "f": "\f", "r": "\r", "e": "\x1b",
+                   " ": " ", '"': '"', "/": "/", "\\": "\\",
+                   "N": "\x85", "_": "\xa0", "L": "\u2028", "P": "\u2029"}
+
+        def decode_escape(match):
+            value = match.group(1)
+            if value[0] in "xuU" and len(value) > 1:
+                try:
+                    return chr(int(value[1:], 16))
+                except ValueError:
+                    return match.group(0)
+            return escapes.get(value, match.group(0))
+
+        return re.sub(r'\\(U[0-9a-fA-F]{8}|u[0-9a-fA-F]{4}|x[0-9a-fA-F]{2}|.)',
+                      decode_escape, raw[1:-1])
     return raw
 
 

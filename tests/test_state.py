@@ -1476,6 +1476,9 @@ class MatrixStateCleanupTests(unittest.TestCase):
             labels=["performance"],
             agent_id="agent-1",
             assigned_engineer_id="eng-1",
+            assigned_architect_id="architect-owner",
+            created_by_architect_id="architect-creator",
+            created_by_engineer_id="engineer-creator",
             parent_task_id="parent-1",
             pipeline_depth=1,
             status="On Review",
@@ -1574,6 +1577,9 @@ class MatrixStateCleanupTests(unittest.TestCase):
         self.assertEqual(task["updated_at"], "2026-04-22T00:00:00+00:00")
         self.assertEqual(task["scheduled_at"], "2026-04-23T00:00:00+00:00")
         self.assertEqual(task["dispatch_state"], "live")
+        self.assertEqual(task["assigned_architect_id"], "architect-owner")
+        self.assertEqual(task["created_by_architect_id"], "architect-creator")
+        self.assertEqual(task["created_by_engineer_id"], "engineer-creator")
         self.assertEqual(task["depends_on"], ["task-0"])
         self.assertEqual(task["provider"], "github")
         self.assertEqual(task["external_id"], "123")
@@ -5600,6 +5606,21 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
         self.assertEqual(task_upserts[-1]["lane"], "Archived")
         self.assertEqual(task_upserts[-1]["status"], "")
 
+    def test_board_move_task_position_inserts_and_reindexes_destination_lane(self):
+        state = self._make_state()
+        first = state.board_add_task("First", "g", lane="To Do", id="first")
+        second = state.board_add_task("Second", "g", lane="To Do", id="second")
+        moving = state.board_add_task("Moving", "g", lane="Backlog", id="moving")
+
+        state.board_move_task(moving.id, "To Do", position=1)
+
+        ordered = sorted(
+            (task for task in state.board_tasks.values() if task.lane == "To Do"),
+            key=lambda task: task.position,
+        )
+        self.assertEqual([task.id for task in ordered], [first.id, moving.id, second.id])
+        self.assertEqual([task.position for task in ordered], [0, 1, 2])
+
     def test_lane_transition_timestamp_tracks_update_and_remove_lane_moves(self):
         state = self._make_state()
         state.board_add_lane("Review")
@@ -6693,5 +6714,39 @@ class AgentGroupOrderPersistenceTests(unittest.TestCase):
                     reloaded.groups["g"],
                     ["arch-c", "arch-a", "worker", "arch-b"],
                 )
+            finally:
+                db.close()
+
+    def test_child_terminal_order_survives_database_reload_and_reparenting(self):
+        from torque.db import TorqueDB
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db = TorqueDB(Path(tmp) / "torque.db")
+            db.init()
+            try:
+                state = self.state_mod.MatrixState(db=db)
+                state.groups = {"g": ["owner", "other"]}
+                for aid, parent in (("owner", ""), ("other", ""),
+                                    ("first", "owner"), ("second", "owner"),
+                                    ("third", "owner")):
+                    cell = self.state_mod.AgentCell(
+                        id=aid, name=aid, group="g", parent_id=parent,
+                        kind="terminal" if parent else "worker",
+                        cell_type="terminal" if parent else "agent",
+                    )
+                    state.agents[aid] = cell
+                    state._db_save_agent(cell)
+                state._rebuild_children()
+                state._db_save_groups()
+                state.reorder_child("third", "owner", before="first")
+                state.reparent_terminal("second", "other")
+                self.assertEqual(state._children["owner"], ["third", "first"])
+
+                reloaded = self.state_mod.MatrixState(db=db)
+                reloaded.load()
+                self.assertEqual(reloaded._children["owner"], ["third", "first"])
+                self.assertEqual(reloaded._children["other"], ["second"])
+                self.assertEqual(reloaded.agents["second"].parent_id, "other")
+                self.assertEqual(db.load_all()["children"], reloaded._children)
             finally:
                 db.close()

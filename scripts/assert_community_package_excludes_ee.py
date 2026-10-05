@@ -18,6 +18,7 @@ DEFAULT_ALLOWED_TOP_LEVEL = {
     "torque",
     "torque.py",
     "torque_desktop.py",
+    "ui",
     "webview.html",
 }
 
@@ -53,6 +54,54 @@ def assert_expected_top_level(artifact_dir: Path) -> None:
         raise AssertionError(
             "Community install artifact contains unexpected top-level entries: "
             + ", ".join(unexpected)
+        )
+
+
+def assert_react_ui_artifact(artifact_dir: Path) -> None:
+    ui_dir = artifact_dir / "ui"
+    dist_dir = ui_dir / "dist"
+    required = [dist_dir / "index.html", dist_dir / ".vite" / "manifest.json"]
+    missing = [str(path.relative_to(artifact_dir)) for path in required if not path.is_file()]
+    if missing:
+        raise AssertionError(
+            "Community install artifact is missing built React UI files: "
+            + ", ".join(missing)
+        )
+    forbidden = [
+        ui_dir / "node_modules",
+        ui_dir / "src",
+        ui_dir / "package.json",
+        ui_dir / "package-lock.json",
+    ]
+    leaked = [str(path.relative_to(artifact_dir)) for path in forbidden if path.exists()]
+    if leaked:
+        raise AssertionError(
+            "Community install artifact contains React UI source/dependencies: "
+            + ", ".join(leaked)
+        )
+    source_maps = [
+        str(path.relative_to(artifact_dir))
+        for path in dist_dir.rglob("*.map")
+    ]
+    if source_maps:
+        raise AssertionError(
+            "Community React UI artifact contains production source maps: "
+            + ", ".join(source_maps[:20])
+        )
+    forbidden_markers = (
+        b"torque_ee",
+        b"ee/frontend",
+        b"enterpriseExtensionRegistry",
+    )
+    marker_leaks = []
+    for path in _relative_files(dist_dir):
+        payload = (dist_dir / path).read_bytes()
+        if any(marker in payload for marker in forbidden_markers):
+            marker_leaks.append(str(Path("ui/dist") / path))
+    if marker_leaks:
+        raise AssertionError(
+            "Community React UI artifact contains enterprise markers: "
+            + ", ".join(marker_leaks[:20])
         )
 
 
@@ -96,6 +145,7 @@ def main(argv: list[str] | None = None) -> int:
         try:
             assert_expected_top_level(artifact_dir)
             assert_no_ee_paths(artifact_dir)
+            assert_react_ui_artifact(artifact_dir)
         except AssertionError as exc:
             sys.stderr.write(str(exc) + "\n")
             return 1

@@ -30,11 +30,13 @@ Useful local commands:
 - `make open` opens the web UI for the current Torque port.
 - `make desktop-deps` installs the optional native desktop shell dependency.
 
-Torque has no frontend build step: edit `webview.html`, `static/js/*`, and
-`static/style.css` directly. Script order in `webview.html` matters. When
-changing live frontend panels, preserve operator state across routine rerenders
-(scroll position, focus/caret, expanded sections, and drafts) unless the view is
-intentionally navigating away.
+The primary frontend is the React/TypeScript/Vite application under `ui/`.
+Install its locked dependencies with `npm --prefix ui ci` and use `make ui-check`
+for lint, typecheck, unit tests, and the production build. `webview.html` and
+`static/` are the temporary classic fallback; changes there still require its
+Node regression coverage and must preserve script order. On either renderer,
+preserve scroll position, focus/caret, expanded sections, selection, and drafts
+across routine rerenders unless the view is intentionally navigating away.
 
 ## Tests and lint
 

@@ -542,12 +542,19 @@ async def handle_agent_operation_command(
             directory=directory, tab_color=tab_color,
             parent_id=parent_id,
         )
-        if cell:
+        if not cell:
+            result = {"type": "error", "message": "Failed to create terminal"}
+        else:
             await bridge.create_session(
                 cell, env_vars=env,
                 env_file=env_file,
                 init_script=init_script,
                 shell=shell)
+            result = {
+                "type": "terminal_created", "id": cell.id,
+                "name": cell.name, "kind": "terminal", "group": cell.group,
+                "parent_id": cell.parent_id,
+            }
 
     elif cmd == "remove_agent":
         result = await _handle_remove_agent_command(
@@ -638,7 +645,16 @@ async def handle_agent_operation_command(
         await _handle_send_text_command(data, state, _send_agent_prompt)
 
     elif cmd == "send_user_message":
-        await _handle_send_user_message_command(data, state, bridge)
+        cell_id = str(data.get("cell_id") or data.get("id") or "").strip()
+        cell = state.agents.get(cell_id)
+        session_id = str(getattr(cell, "session_id", "") or "")
+        expected_session = str(data.get("session_id", "") or "")
+        if expected_session and expected_session != session_id:
+            result = {"type": "error", "message": "The terminal session changed. Review the draft before retrying.", "delivery_refused": True}
+        elif await _handle_send_user_message_command(data, state, bridge):
+            result = {"type": "terminal_message_sent", "cell_id": cell_id, "session_id": session_id}
+        else:
+            result = {"type": "error", "message": "The message could not be sent to an active terminal.", "delivery_refused": True}
 
     elif cmd == "user_agent_message":
         result = await _handle_user_agent_message_command(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import copy
 from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Any
@@ -46,43 +47,24 @@ async def handle_prompt_preview_command(
 
     # Preview rendered prompt for a task or inline params
     tid = data.get("id", "")
-    act_name = data.get("action_name", "")
-    preview_role_slug = str(
-        data.get("agent_template", "") or ""
-    ).strip()
-    task_text = data.get("task", "")
-    avars = data.get("action_vars", {})
-    act_group = data.get("group", "")
-    attachments = data.get("attachments", [])
-    artifacts = normalize_artifacts(data.get("artifacts", []))
-
-    if tid and not task_text:
-        t = state.board_tasks.get(tid)
-        if t:
-            task_text = t.task
-            act_name = act_name or t.action_name
-            preview_role_slug = (
-                preview_role_slug
-                or str(t.agent_template or "").strip()
-            )
-            avars = avars or t.action_vars or {}
-            act_group = act_group or t.group
-            attachments = t.attachments or []
-            artifacts = normalize_artifacts(t.artifacts or [])
-
-    task_desc = data.get("description", "")
-    if tid and not task_desc:
-        t = state.board_tasks.get(tid)
-        if t:
-            task_desc = t.description or ""
-
     preview_task = state.board_tasks.get(tid) if tid else None
+
+    def draft_value(name, default=""):
+        # Presence matters: an explicit empty value clears the saved field.
+        return data[name] if name in data else getattr(preview_task, name, default)
+
+    act_name = draft_value("action_name")
+    preview_role_slug = str(draft_value("agent_template") or "").strip()
+    task_text = draft_value("task")
+    task_desc = draft_value("description")
+    avars = draft_value("action_vars", {}) or {}
+    act_group = draft_value("group")
+    attachments = draft_value("attachments", []) or []
+    artifacts = normalize_artifacts(draft_value("artifacts", []))
     preview_cell = None
-    preview_agent_id = str(data.get("agent_id", "") or "").strip()
+    preview_agent_id = str(draft_value("agent_id") or "").strip()
     if preview_agent_id:
         preview_cell = state.agents.get(preview_agent_id)
-    elif preview_task and preview_task.agent_id:
-        preview_cell = state.agents.get(preview_task.agent_id)
     elif preview_role_slug:
         preview_cell = SimpleNamespace(
             id="",
@@ -104,7 +86,15 @@ async def handle_prompt_preview_command(
             checkpoint_on_progress=False,
         )
 
-    preview_task_obj = preview_task or SimpleNamespace(
+    if preview_cell:
+        preview_cell = copy(preview_cell)
+        if "agent_template" in data:
+            preview_cell.role = preview_role_slug
+            preview_cell.template = preview_role_slug
+        if "group" in data:
+            preview_cell.group = act_group
+
+    preview_task_obj = copy(preview_task) if preview_task else SimpleNamespace(
         id=tid,
         task=task_text,
         slug="",
@@ -132,6 +122,21 @@ async def handle_prompt_preview_command(
         updated_at="",
         agent_id=preview_agent_id,
     )
+    # The copy retains identity, ancestry and verification metadata, while every
+    # supplied draft field reaches TASK, torque context and the postscript alike.
+    for name, value in {
+        "task": task_text, "description": task_desc, "group": act_group,
+        "action_name": act_name, "action_vars": avars,
+        "agent_template": preview_role_slug, "agent_id": preview_agent_id,
+        "attachments": attachments, "artifacts": artifacts,
+    }.items():
+        setattr(preview_task_obj, name, value)
+    for name in (
+        "labels", "parent_task_id", "verification_mode", "verification_state",
+        "verification_notes", "verification_summary",
+    ):
+        if name in data:
+            setattr(preview_task_obj, name, data[name])
     preview_upstream_artifacts = serialize_upstream_task_artifacts(
         preview_task_obj,
         tasks_by_id=state.board_tasks,
@@ -151,6 +156,17 @@ async def handle_prompt_preview_command(
             **TORQUE_CONTEXT_STUB,
             "task": {
                 **TORQUE_CONTEXT_STUB["task"],
+                "id": tid,
+                "slug": getattr(preview_task_obj, "slug", ""),
+                "depth": getattr(preview_task_obj, "pipeline_depth", 0),
+                "is_derived": bool(preview_task_obj.parent_task_id),
+                "parent_task_id": preview_task_obj.parent_task_id,
+                "labels": preview_task_obj.labels,
+                "status": preview_task_obj.status,
+                "verification_mode": preview_task_obj.verification_mode,
+                "verification_state": preview_task_obj.verification_state,
+                "verification_notes": preview_task_obj.verification_notes,
+                "verification_summary": preview_task_obj.verification_summary,
                 "title": task_text,
                 "description": task_desc,
                 "group": act_group,
@@ -231,4 +247,9 @@ async def handle_prompt_preview_command(
             ),
         }
 
+    if tid:
+        # Echo the target so concurrent React inspectors can retain previews
+        # without a global last-response race. Legacy consumers ignore it.
+        result["id"] = tid
+        result["task_id"] = tid
     return result

@@ -65,17 +65,29 @@ async def _handle_role_template_command(
         return {"type": "error", "message": f"{item_name} name required"}
 
     if cmd in {"save_role", "save_template"}:
-        scope = data.get("scope", "project")
+        scope = data.get("scope", "project") or "project"
         old_name = data.get("old_name", "").strip()
         payload = data.get("data")
         if payload is None:
             payload = data.get("role")
         if payload is None:
             payload = data.get("template", {})
-        if old_name and old_name != name:
-            role_mgr.delete_template(old_name, base_dir=base_dir)
-            role_mgr.delete_template(old_name, scope="user", base_dir=base_dir)
-        role_mgr.save_role(name, payload, scope=scope, base_dir=base_dir)
+        old_scope = str(data.get("old_scope", "") or "").strip()
+        if scope not in {"project", "user"} or old_scope not in {"", "project", "user"}:
+            return {"type": "error", "message": "Catalog scope must be project or user"}
+        if old_name and not old_scope:
+            match = next((item for item in role_mgr.list_roles(base_dir)
+                          if item.get("name") == old_name), None)
+            old_scope = "user" if match and match.get("global") else "project"
+        if not isinstance(payload, dict):
+            return {"type": "error", "message": f"{item_name} definition must be an object"}
+        try:
+            # Keep the original until validation and replacement persistence succeed.
+            role_mgr.save_role(name, payload, scope=scope, base_dir=base_dir)
+            if old_name and (old_name != name or old_scope != scope):
+                role_mgr.delete_template(old_name, scope=old_scope, base_dir=base_dir)
+        except (ValueError, OSError) as exc:
+            return {"type": "error", "message": str(exc)}
         return {
             "type": response_type,
             "group": group,

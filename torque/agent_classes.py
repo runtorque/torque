@@ -8,7 +8,7 @@ project and authorize Torque MCP tools.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from functools import lru_cache
 from pathlib import Path
 import hashlib
@@ -1373,6 +1373,8 @@ def enriched_agent_class_preview(definition: AgentClassDefinition | dict[str, An
     if isinstance(definition, dict):
         definition = AgentClassDefinition.from_dict(definition)
     preview = definition.as_preview_dict()
+    # Editing must use authored ACL rules, not the resolved grant projection.
+    preview["authoring_definition"] = _canonical_agent_class_data(asdict(definition))
     preview["metadata"] = dict(definition.metadata or {})
     preview["draft"] = dict(definition.draft or {})
     preview["prompt"] = _normalized_prompt_mapping(definition.prompt)

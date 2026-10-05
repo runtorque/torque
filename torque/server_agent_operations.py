@@ -105,9 +105,11 @@ def _create_agent_launch_overrides(data: dict) -> dict:
     """Return explicit launch inputs without resolving inherited values."""
     overrides = {
         key: str(data.get(key, "") or "").strip()
-        for key in ("command", "provider", "directory")
+        for key in ("command", "provider", "directory", "shell", "icon")
         if str(data.get(key, "") or "").strip()
     }
+    if isinstance(data.get("env_vars"), dict):
+        overrides["env_vars"] = dict(data["env_vars"])
     for source, target in _CREATE_AGENT_LAUNCH_SETTING_TARGETS.items():
         value = _create_agent_settings_payload(data).get(source)
         if value is None:

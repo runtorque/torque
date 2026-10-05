@@ -38,6 +38,12 @@ AGENT_CLASS_COMMAND_NAMES = frozenset({
 })
 
 
+# YAML authoring has no state delta; assignment changes the live agent projection.
+AGENT_CLASS_STATE_MUTATION_COMMAND_NAMES = frozenset({
+    "agent_class_assign", "agent_class_clear",
+})
+
+
 def _agent_class_authoring_payload_from_command(data: dict) -> dict:
     for key in ("agent_class", "definition"):
         value = data.get(key)
@@ -60,11 +66,16 @@ async def _handle_agent_class_command(
 
     cmd = str(data.get("cmd", "") or "").strip()
     if cmd == "agent_class_list":
-        base_dir = str(data.get("base_dir", "") or os.getcwd())
+        group = str(data.get("group", "") or "").strip()
+        base_dir = str(data.get("base_dir", "") or "").strip()
+        if not base_dir:
+            base_dir = (await resolve_base_dir(group) if group else "") or os.getcwd()
         classes, issues = load_agent_classes(base_dir=base_dir)
         authoring_contract = agent_class_authoring_contract()
         return {
             "type": "agent_classes",
+            "group": group,
+            "base_dir": base_dir,
             "schema_version": AGENT_CLASS_SCHEMA_VERSION,
             "classes": [
                 enriched_agent_class_preview(definition, base_dir=base_dir)
@@ -216,12 +227,18 @@ async def _handle_agent_class_command(
         }
 
     if cmd == "agent_class_audit":
+        agent_id = str(data.get("agent_id", "") or "").strip()
         if not db:
-            return {"type": "agent_class_audit", "events": []}
+            return {
+                "type": "agent_class_audit",
+                "agent_id": agent_id,
+                "events": [],
+            }
         return {
             "type": "agent_class_audit",
+            "agent_id": agent_id,
             "events": db.list_agent_class_audit(
-                agent_id=str(data.get("agent_id", "") or ""),
+                agent_id=agent_id,
                 limit=int(data.get("limit", 50) or 50),
             ),
         }

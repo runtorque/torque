@@ -871,6 +871,16 @@ PLANNING_COMMAND_NAMES = frozenset().union(
     IDEA_BRIEF_COMMAND_NAMES,
 )
 
+# Direct responses bypass the server's shared mutation broadcast tail. Keep
+# Planning's read/write disposition beside its command manifest so successful
+# writes reach every subscriber before the direct response is returned.
+PLANNING_READ_COMMAND_NAMES = frozenset({
+    "initiative_list", "initiative_show", "area_list", "area_show",
+    "scratchpad_note_list", "scratchpad_note_show",
+    "idea_brief_list", "idea_brief_show",
+})
+PLANNING_MUTATION_COMMAND_NAMES = PLANNING_COMMAND_NAMES - PLANNING_READ_COMMAND_NAMES
+
 _PLANNING_COMMAND_REGISTRY = AsyncHandlerRegistry()
 _PLANNING_COMMAND_REGISTRY.register_many(
     INITIATIVE_COMMAND_NAMES,

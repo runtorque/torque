@@ -17,8 +17,12 @@ TEST_EE_COMMAND ?= $(TEST_PYTHON) -m unittest -v \
 	tests.test_ee_python_package \
 	tests.test_relay_probe \
 	tests.test_frontend_remote
+TEST_EE_REQUIRE_CHECKOUT ?= 1
 TEST_RESULT_DIR ?= $(CURDIR)/.torque/test-results
 TEST_RESULT_FOOTER := scripts/test_result_footer.py
+UI_DIR ?= ui
+UI_NPM ?= npm
+UI_NODE_MODULES_STAMP := $(UI_DIR)/node_modules/.package-lock.json
 
 # The finalizer reads the literal command from this exported make variable;
 # the command itself is still expanded directly by the current recipe shell.
@@ -33,15 +37,52 @@ PERF_PYTHON    ?= $(PERF_VENV)/bin/python
 # Test recipes must not inherit Torque runtime/agent env from worker shells.
 SANITIZE_TORQUE_TEST_ENV = env $$(env | sed -n 's/^\(TORQUE_[A-Za-z0-9_]*\)=.*/-u \1/p')
 
-.PHONY: install-standalone uninstall run bootstrap deps desktop-deps ai-deps check stop deploy cli standalone standalone-bg desktop desktop-attach tauri-dev tauri-build tauri-build-mac open lint lint-tauri-permissions lint-docs-contract assert-community-package test test-ee perf-deps perf-baseline perf-delta
+.PHONY: install-standalone uninstall run bootstrap deps desktop-deps ai-deps check stop deploy cli standalone standalone-bg desktop desktop-attach tauri-dev ui-tauri-dev tauri-build tauri-build-mac open open-legacy ui-deps ui-dev ui-build ui-lint ui-typecheck ui-test ui-check lint lint-tauri-permissions lint-docs-contract assert-community-package test test-ee perf-deps perf-baseline perf-delta
+
+$(UI_NODE_MODULES_STAMP): $(UI_DIR)/package.json $(UI_DIR)/package-lock.json
+	$(UI_NPM) --prefix "$(UI_DIR)" ci
+
+## ui-deps: Install the locked React UI dependencies when the lockfile changes.
+ui-deps: $(UI_NODE_MODULES_STAMP)
+
+## ui-dev: Run the Vite UI dev server; proxy target follows TORQUE_UI_DAEMON_ORIGIN/TORQUE_PORT.
+ui-dev: ui-deps
+	TORQUE_UI_DAEMON_ORIGIN="$${TORQUE_UI_DAEMON_ORIGIN:-http://127.0.0.1:$${TORQUE_PORT:-18932}}" \
+		$(UI_NPM) --prefix "$(UI_DIR)" run dev
+
+## ui-build: Typecheck and build the production React UI assets.
+ui-build: ui-deps
+	$(UI_NPM) --prefix "$(UI_DIR)" run build
+
+ui-lint: ui-deps
+	$(UI_NPM) --prefix "$(UI_DIR)" run lint
+
+ui-typecheck: ui-deps
+	$(UI_NPM) --prefix "$(UI_DIR)" run typecheck
+
+ui-test: ui-deps
+	$(UI_NPM) --prefix "$(UI_DIR)" run test
+
+ui-check: ui-deps
+	$(UI_NPM) --prefix "$(UI_DIR)" run check
+	$(UI_NPM) --prefix "$(UI_DIR)" run build
 
 ## install-standalone: Copy the primary standalone/desktop app files to ~/.torque/app
-install-standalone:
+# NUL-delimited copy loops require Bash read -d (Ubuntu /bin/sh is dash).
+install-standalone: SHELL := /bin/bash
+install-standalone: ui-build
 	@mkdir -p "$(PRIMARY_APP_DIR)/torque"
 	@mkdir -p "$(PRIMARY_APP_DIR)/static/js"
 	cp torque.py "$(PRIMARY_APP_DIR)/$(MAIN_SCRIPT)"
 	cp torque_desktop.py "$(PRIMARY_APP_DIR)/torque_desktop.py"
 	cp webview.html "$(PRIMARY_APP_DIR)/webview.html"
+	@mkdir -p "$(PRIMARY_APP_DIR)/ui/dist"
+	@find "$(UI_DIR)/dist" -type f -print0 | while IFS= read -r -d '' src; do \
+		rel="$${src#$(UI_DIR)/dist/}"; \
+		dest="$(PRIMARY_APP_DIR)/ui/dist/$$rel"; \
+		mkdir -p "$$(dirname "$$dest")"; \
+		cp "$$src" "$$dest"; \
+	done
 	@find torque -type f \( -name '*.py' -o -name '*.yaml' -o -name '*.yml' \) -print0 | while IFS= read -r -d '' src; do \
 		dest="$(PRIMARY_APP_DIR)/$$src"; \
 		mkdir -p "$$(dirname "$$dest")"; \
@@ -299,20 +340,54 @@ tauri-dev:
 		TORQUE_PROFILE="$$profile" \
 		TORQUE_DATA_DIR="$$data_dir" \
 		TORQUE_DESKTOP_MODE="$$mode" \
+		TORQUE_UI_URL="$${TORQUE_UI_URL:-}" \
 		PATH="$$HOME/.cargo/bin:$$PATH" \
 		cargo tauri dev
 
+## ui-tauri-dev: Run Vite and the Tauri shell together against one isolated daemon.
+ui-tauri-dev: ui-deps
+	@port="$(or $(TORQUE_PORT),18933)"; \
+		TORQUE_UI_DAEMON_ORIGIN="http://127.0.0.1:$$port" \
+			$(UI_NPM) --prefix "$(UI_DIR)" run dev & \
+		ui_pid=$$!; \
+		trap 'kill $$ui_pid 2>/dev/null || true' EXIT INT TERM; \
+		tries=0; \
+		until curl -fsS http://127.0.0.1:5173/ >/dev/null 2>&1; do \
+			if ! kill -0 $$ui_pid 2>/dev/null; then wait $$ui_pid; exit $$?; fi; \
+			tries=$$((tries + 1)); \
+			if [ $$tries -ge 100 ]; then echo "Vite did not become ready on port 5173" >&2; exit 1; fi; \
+			sleep 0.1; \
+		done; \
+		$(MAKE) --no-print-directory tauri-dev \
+			TORQUE_PORT="$$port" \
+			TORQUE_UI_URL="http://127.0.0.1:5173/"
+
 ## tauri-build: Build production Tauri shell for current platform.
-tauri-build:
+tauri-build: ui-deps
 	@cd src-tauri && env TORQUE_REPO_ROOT="$(CURDIR)" PATH="$$HOME/.cargo/bin:$$PATH" cargo tauri build
 
 ## tauri-build-mac: Build macOS .app/.dmg (requires macOS host).
-tauri-build-mac:
-	@cd src-tauri && env TORQUE_REPO_ROOT="$(CURDIR)" PATH="$$HOME/.cargo/bin:$$PATH" cargo tauri build --bundles app,dmg
+tauri-build-mac: ui-deps
+	@cd src-tauri && env \
+		TORQUE_REPO_ROOT="$(CURDIR)" \
+		APPLE_SIGNING_IDENTITY="$${APPLE_SIGNING_IDENTITY:--}" \
+		PATH="$$HOME/.cargo/bin:$$PATH" \
+		cargo tauri build --bundles app,dmg
+	@bundle_root="src-tauri/target/release/bundle"; \
+		app_path=$$(find "$$bundle_root/macos" -maxdepth 1 -type d -name '*.app' -print -quit); \
+		dmg_path=$$(find "$$bundle_root/dmg" -maxdepth 1 -type f -name '*.dmg' -print -quit); \
+		test -n "$$app_path" || { echo "No macOS app bundle produced." >&2; exit 1; }; \
+		test -n "$$dmg_path" || { echo "No macOS DMG produced." >&2; exit 1; }; \
+		codesign --verify --deep --strict --verbose=2 "$$app_path"; \
+		hdiutil verify "$$dmg_path"
 
-## open: Open the Torque UI in the default browser (works in dual or standalone mode)
+## open: Open the primary React UI in the default browser.
 open:
 	@open "http://127.0.0.1:$(or $(TORQUE_PORT),18932)/"
+
+## open-legacy: Open the temporary classic fallback during the React burn-in window.
+open-legacy:
+	@open "http://127.0.0.1:$(or $(TORQUE_PORT),18932)/legacy/"
 
 ## check: Verify prerequisites
 check:
@@ -337,7 +412,7 @@ check:
 		|| echo "Primary app installed: no (run: make deploy)"
 
 ## lint: Run repository lint checks
-lint: lint-tauri-permissions lint-docs-contract assert-community-package
+lint: ui-lint ui-typecheck lint-tauri-permissions lint-docs-contract assert-community-package
 
 ## lint-tauri-permissions: Ensure every registered Tauri command has a local permission
 lint-tauri-permissions:
@@ -352,12 +427,12 @@ assert-community-package:
 	@python3 scripts/assert_community_package_excludes_ee.py
 
 ## test: Run the automated regression suite
-test: lint
+test: lint ui-test
 	@$(call RUN_TEST_TARGET,test,TEST_COMMAND,)
 
 ## test-ee: Run enterprise-only regression tests (requires ee/ checkout)
 test-ee: lint
-	@for path in \
+	@if [ "$(TEST_EE_REQUIRE_CHECKOUT)" = "1" ]; then for path in \
 		ee \
 		ee/python/torque_ee_connector \
 		ee/frontend/remote/js \
@@ -366,7 +441,7 @@ test-ee: lint
 		ee/python/README.md \
 		ee/relay/README.md; do \
 		[ -e "$$path" ] || { echo "Error: $$path is required for make test-ee"; exit 1; }; \
-	done
+	done; fi
 	@$(call RUN_TEST_TARGET,test-ee,TEST_EE_COMMAND,TORQUE_WITH_EE=1)
 
 # Keep the suite command in Make's current /bin/sh: wrapping it in a Python

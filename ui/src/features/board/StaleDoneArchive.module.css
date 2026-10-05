@@ -1,0 +1,4 @@
+.suggestion { display: grid; gap: var(--space-1); padding: var(--space-2); border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); }
+.archive { width: 100%; height: auto; white-space: normal; text-align: left; }
+.suggestion p { margin: 0; font-size: var(--ui-font-size); color: var(--text-dim); overflow-wrap: anywhere; }
+.suggestion [role='alert'] p { color: var(--danger); }

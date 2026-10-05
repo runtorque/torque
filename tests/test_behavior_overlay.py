@@ -66,6 +66,47 @@ class BehaviorOverlayTests(unittest.TestCase):
         self.worker.owner_engineer_id = self.engineer.id
         self.state._db_save_agent(self.worker)
 
+    def test_operator_decisions_validate_the_reviewed_proposal(self):
+        from torque.commands.behavior_overlays import (
+            _handle_behavior_overlay_user_approve_command as approve,
+            _handle_behavior_overlay_user_reject_command as reject,
+        )
+        for decide in (approve, reject):
+            for field in ("expected_proposed_text_sha256", "expected_base_version_id"):
+                with self.subTest(command=decide.__name__, field=field):
+                    proposal = self.state.create_behavior_overlay_proposal(
+                        scope_kind="role", scope_group="g", scope_key="worker",
+                        proposed_by_kind="user", proposed_by_agent_id="user",
+                        text="Use focused verification.", rationale="review binding",
+                    )
+                    result = decide({"proposal_id": proposal["id"], field: "stale"}, self.state)
+                    self.assertEqual(result["type"], "error")
+                    self.assertEqual(
+                        self.state.load_behavior_overlay_proposal(proposal["id"])["status"],
+                        "proposed",
+                    )
+                    result = reject({
+                        "proposal_id": proposal["id"],
+                        "expected_proposed_text_sha256": proposal["proposed_text_sha256"],
+                        "expected_base_version_id": proposal["base_version_id"],
+                        "note": "Reviewed and withdrawn",
+                    }, self.state)
+                    self.assertEqual(result["status"], "rejected")
+
+    def test_operator_approval_preserves_legacy_empty_optional_hash(self):
+        from torque.commands.behavior_overlays import (
+            _handle_behavior_overlay_user_approve_command,
+        )
+        proposal = self.state.create_behavior_overlay_proposal(
+            scope_kind="role", scope_group="g", scope_key="worker",
+            proposed_by_kind="user", proposed_by_agent_id="user",
+            text="Use focused verification.", rationale="legacy CLI",
+        )
+        result = _handle_behavior_overlay_user_approve_command({
+            "proposal_id": proposal["id"], "expected_proposed_text_sha256": "",
+        }, self.state)
+        self.assertEqual(result["status"], "applied")
+
     def _apply_overlay(self, agent_id: str, text: str, *, architect_id: str = ""):
         proposal = self.state.create_behavior_overlay_proposal(
             agent_id=agent_id,

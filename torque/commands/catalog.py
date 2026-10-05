@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 from typing import Any
 
 from ..dispatch_registry import AsyncHandlerRegistry
+from ..services.agent_launch_defaults import resolve_fast_mode, worker_launch_overrides
 from .roles import ROLE_TEMPLATE_COMMAND_NAMES, _ROLE_TEMPLATE_COMMAND_REGISTRY
+from .action_authoring import ACTION_AUTHORING_COMMANDS, handle_action_authoring_command
 
 
 CATALOG_COMMAND_NAMES = frozenset({
@@ -32,6 +33,11 @@ CATALOG_COMMAND_NAMES = frozenset({
     'save_action',
     'delete_action',
 }) | ROLE_TEMPLATE_COMMAND_NAMES
+
+
+# File-backed catalog writes return their own catalog result. This operation
+# also changes the shared live agent projection and must publish that delta.
+CATALOG_STATE_MUTATION_COMMAND_NAMES = frozenset({'set_engineer_specializations'})
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,7 +66,6 @@ async def handle_catalog_command(
     _handle_set_engineer_specializations_command = (
         runtime.handle_set_engineer_specializations_command
     )
-    _action_to_yaml = runtime.action_to_yaml
 
     if cmd == "get_playbook_candidates":
         limit = min(int(data.get("limit", 50)), 200)
@@ -233,21 +238,23 @@ async def handle_catalog_command(
             payload = data.get("specialization", {})
         old_name = str(data.get("old_name", "") or "").strip()
         old_scope = str(data.get("old_scope", "") or "").strip()
-        if old_name and (old_name != name or (
-                old_scope and old_scope != scope)):
-            if old_scope:
-                specialization_mgr.delete_specialization(
-                    old_name, scope=old_scope, base_dir=base_dir)
-            else:
-                specialization_mgr.delete_specialization(
-                    old_name, base_dir=base_dir)
-                specialization_mgr.delete_specialization(
-                    old_name, scope="user", base_dir=base_dir)
+        if scope not in {"project", "user"} or old_scope not in {"", "project", "user"}:
+            return {"type": "error", "message": "Catalog scope must be project or user"}
+        if old_name and not old_scope:
+            match = next((item for item in specialization_mgr.list_specializations(base_dir=base_dir)
+                          if item.get("name") == old_name), None)
+            old_scope = "user" if match and match.get("global") else "project"
+        if not isinstance(payload, dict):
+            return {"type": "error", "message": "Specialization definition must be an object"}
         try:
             specialization_mgr.save_specialization(
-                name, payload or {}, scope=scope, base_dir=base_dir)
-        except ValueError as exc:
+                name, payload, scope=scope, base_dir=base_dir)
+            if old_name and (old_name != name or old_scope != scope):
+                specialization_mgr.delete_specialization(
+                    old_name, scope=old_scope, base_dir=base_dir)
+        except (ValueError, OSError) as exc:
             return {"type": "error", "message": str(exc)}
+
         return {
             "type": "specializations",
             "group": data.get("group", ""),
@@ -300,135 +307,28 @@ async def handle_catalog_command(
     if cmd == "render_template":
         base_dir = await _resolve_base_dir(data.get("group", ""))
         group = data.get("group", "")
+        name = str(data.get("name", "") or "").strip()
+        if name and not template_mgr.load_template(name, base_dir):
+            return {"type": "error", "message": f'Role "{name}" not found'}
         gs = state.get_group_settings(group)
+        overrides = data.get("overrides", {})
+        worker = data.get("kind") == "worker"
+        if worker:
+            overrides = worker_launch_overrides(gs, overrides)
         rendered = template_mgr.resolve_agent_config(
-            data.get("name", ""), gs, data.get("overrides", {}),
-            base_dir=base_dir)
+            name, gs, overrides, base_dir=base_dir)
+        if worker:
+            rendered["fast_mode"] = resolve_fast_mode(
+                rendered.get("fast_mode"), getattr(gs, "worker_fast_mode", "inherit"),
+                getattr(gs, "agent_fast_mode", "inherit"),
+            )
         return {
-            "type": "template_rendered",
-            "name": data.get("name", ""),
-            "config": rendered,
+            "type": "template_rendered", "group": group,
+            "name": name, "config": rendered,
         }
 
-    # get_action: respond directly
-    if cmd == "get_action":
-        base_dir = await _resolve_base_dir(data.get("group", ""))
-        scope = data.get("scope", "")
-        # Scope-aware loading: search only the target directory
-        raw = None
-        if scope == "user":
-            gdir = os.path.expanduser("~/.torque/actions")
-            for suffix in ("", ".yaml", ".yml"):
-                p = os.path.join(gdir, data["name"] + suffix)
-                if os.path.isfile(p):
-                    with open(p) as f:
-                        raw = f.read()
-                    break
-        if raw is None:
-            raw = action_mgr._load_raw(data["name"], base_dir)
-        if not raw:
-            return {"type": "error",
-                    "message": f"Action \"{data['name']}\" not found"}
-        # Editor mode: parse raw YAML without Jinja2 rendering
-        from ..actions import parse_yaml
-        try:
-            act = parse_yaml(raw) or {}
-        except Exception:
-            act = {}
-        avars = action_mgr.get_action_vars(raw)
-        return {"type": "action_detail", "name": data["name"],
-                "action": act, "vars": avars}
-
-    # render_action: render action prompt without creating an agent
-    if cmd == "render_action":
-        base_dir = await _resolve_base_dir(data.get("group", ""))
-        raw = action_mgr._load_raw(data["name"], base_dir)
-        if not raw:
-            return {"type": "error",
-                    "message": f"Action \"{data['name']}\" not found"}
-        variables = data.get("vars", {})
-        rendered = action_mgr.render_action(raw, variables)
-        return {"type": "action_rendered",
-                "name": data["name"],
-                "prompt": rendered.get("prompt", ""),
-                "group": rendered.get("group", ""),
-                "labels": rendered.get("labels", [])}
-
-    # save_action: write action YAML to disk
-    if cmd == "save_action":
-        name = data.get("name", "").strip()
-        if not name:
-            return {"type": "error", "message": "Action name required"}
-        act_data = data.get("action", {})
-        # Validate {{ TASK }} in prompt
-        prompt = act_data.get("prompt", "")
-        if not action_mgr.validate_prompt(prompt):
-            return {"type": "error",
-                    "message": "Action prompt must contain {{ TASK }}"}
-        # Reject 'torque' as a variable name (reserved namespace)
-        avars = action_mgr.get_action_vars(prompt)
-        for av in avars:
-            if av.get("name") == "torque":
-                return {"type": "error",
-                        "message": "'torque' is a reserved variable "
-                                   "name"}
-        scope = data.get("scope", "project")  # "project" or "user"
-        base_dir = await _resolve_base_dir(data.get("group", ""))
-
-        if scope == "user":
-            tdir = os.path.expanduser("~/.torque/actions")
-            os.makedirs(tdir, exist_ok=True)
-        else:
-            tdir = action_mgr.find_actions_dir(base_dir)
-            if not tdir:
-                d = base_dir or os.getcwd()
-                tdir = os.path.join(d, ".torque", "actions")
-                os.makedirs(tdir, exist_ok=True)
-        # Rename or scope change: delete old file from any location
-        old_name = data.get("old_name", "")
-        if old_name:
-            for old_dir in action_mgr.find_actions_dirs(base_dir):
-                for suffix in (".yaml", ".yml"):
-                    old_path = os.path.join(old_dir, old_name + suffix)
-                    if os.path.isfile(old_path):
-                        os.remove(old_path)
-                        break
-        path = os.path.join(tdir, name + ".yaml")
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        yaml_text = _action_to_yaml(name, act_data)
-        with open(path, "w") as f:
-            f.write(yaml_text)
-        # Return updated list
-        actions = action_mgr.list_actions(base_dir)
-        return {"type": "actions",
-                "group": data.get("group", ""),
-                "actions": actions,
-                "saved": name}
-
-    # delete_action: remove action file from disk
-    if cmd == "delete_action":
-        name = data.get("name", "").strip()
-        if not name:
-            return {"type": "error", "message": "Action name required"}
-        base_dir = await _resolve_base_dir(data.get("group", ""))
-        deleted = False
-        for tdir in action_mgr.find_actions_dirs(base_dir):
-            for suffix in (".yaml", ".yml"):
-                path = os.path.join(tdir, name + suffix)
-                if os.path.isfile(path):
-                    os.remove(path)
-                    deleted = True
-                    break
-            if deleted:
-                break
-        if not deleted:
-            return {"type": "error",
-                    "message": f"Action \"{name}\" not found"}
-        actions = action_mgr.list_actions(base_dir)
-        return {"type": "actions",
-                "group": data.get("group", ""),
-                "actions": actions,
-                "deleted": name}
+    if cmd in ACTION_AUTHORING_COMMANDS:
+        return await handle_action_authoring_command(data, runtime)
 
 
 _CATALOG_COMMAND_REGISTRY = AsyncHandlerRegistry()

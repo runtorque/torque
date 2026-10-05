@@ -21,6 +21,10 @@ from typing import Any
 from aiohttp import web
 
 from . import profiling
+from .worktree_requests import ACKNOWLEDGED_WORKTREE_MUTATIONS
+from .pending_requests import PendingCommandWrites, CommandRequestConflict
+from .services.creation_outcomes import AGENT_CREATION_COMMANDS, CreationOutcome
+from .services.delivery_outcomes import DELIVERY_COMMANDS, DeliveryOutcome
 from .attachment_uploads import AttachmentUploadError, save_message_attachment_stream
 from .config import log
 from .state import hot_json_dumps_async
@@ -28,6 +32,11 @@ from .event_ingest_db import redact_event_for_mcp_call_log
 from .events import build_event_ingest_envelope
 from .mcp import dispatch_mcp_rpc_body
 from .mcp_retry import api_request_hash, is_api_write_command, replay_failed_writes
+from .react_ui_assets import (
+    react_ui_cache_headers,
+    react_ui_request_path,
+    resolve_react_ui_file,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,6 +51,8 @@ class EventRoutes:
 @dataclass(frozen=True, slots=True)
 class HttpRoutes:
     handle_index: Any
+    handle_legacy: Any
+    handle_react_ui: Any
     handle_runtime: Any
     handle_ws: Any
     handle_terminal_ws: Any
@@ -389,9 +400,41 @@ def build_http_routes(
     _send_ui_ws_json = send_ui_ws_json
     _tail_log_entries = tail_log_entries
     _ui_client_id_from_request = ui_client_id_from_request
-    async def handle_index(_request):
+    def _serve_legacy():
             from .config import WEBVIEW_FILE  # re-read after init_paths
-            return web.FileResponse(WEBVIEW_FILE)
+            return web.FileResponse(WEBVIEW_FILE, headers={
+                "Cache-Control": "no-store",
+            })
+
+    def _serve_react_path(request_path: str):
+            from .config import REACT_UI_DIR  # re-read after init_paths
+            path = resolve_react_ui_file(REACT_UI_DIR, request_path)
+            if path is None:
+                if not (REACT_UI_DIR / "index.html").is_file():
+                    return web.Response(
+                        status=503,
+                        text="Torque React UI is not built. Run: make ui-build\n",
+                        content_type="text/plain",
+                    )
+                raise web.HTTPNotFound()
+            return web.FileResponse(path, headers=react_ui_cache_headers(path))
+
+    async def handle_index(request):
+            from .config import UI_DEFAULT
+            if UI_DEFAULT == "legacy":
+                return _serve_legacy()
+            return _serve_react_path(react_ui_request_path(
+                request.path,
+                request.match_info.get("path", ""),
+            ))
+
+    async def handle_legacy(_request):
+            return _serve_legacy()
+
+    async def handle_react_ui(request):
+            if request.path == "/ui-next":
+                raise web.HTTPPermanentRedirect("/ui-next/")
+            return _serve_react_path(request.match_info.get("path", ""))
 
     async def handle_runtime(_request):
             """Return lightweight runtime identity for launcher readiness probes."""
@@ -543,6 +586,18 @@ def build_http_routes(
                 terminal_clients.get(cell_id, set()).discard(ws)
             return ws
 
+    pending_api_writes = PendingCommandWrites()
+    unsettled_creations: dict[str, CreationOutcome] = {}
+    # Preserve completed and uncertain outcomes until their receipts are durable.
+    # Only an explicit verified refusal allows the same command to execute again.
+    unsettled_deliveries: dict[str, DeliveryOutcome] = {}
+    # Completed receipts alone cannot deduplicate writes during awaited
+    # creation, terminal delivery or turn interruption. A disconnected caller must not
+    # cancel the shared write before its durable receipt is saved.
+    coordinated_writes = ACKNOWLEDGED_WORKTREE_MUTATIONS | AGENT_CREATION_COMMANDS | DELIVERY_COMMANDS | {
+        'board_add_task', 'schedule_create',
+    }
+
     async def handle_api_cmd(request):
             """REST endpoint for CLI and scripting access.
 
@@ -574,10 +629,34 @@ def build_http_routes(
                      "type": "worker_lifecycle_guard"},
                     status=guard["status"])
 
+            key = str(data.get("idempotency_key", "") or "").strip()
+            if not key or (cmd not in coordinated_writes
+                           and key not in unsettled_creations
+                           and key not in unsettled_deliveries):
+                return await _execute_api_command(data)
+            try:
+                response = await pending_api_writes.run(
+                    key, api_request_hash(data),
+                    lambda: _execute_api_command(data),
+                )
+            except CommandRequestConflict as exc:
+                return web.json_response({"ok": False, "error": str(exc)}, status=409)
+            # Each HTTP caller gets a distinct response object; only the
+            # completed body from its keyed command operation is shared.
+            return web.Response(body=response.body, status=response.status,
+                                headers=response.headers.copy())
+
+    async def _execute_api_command(data):
+            cmd = data["cmd"]
             idempotency_key = str(data.get("idempotency_key", "") or "").strip()
-            request_hash = ""
+            request_hash = api_request_hash(data) if idempotency_key else ""
+            delivery = unsettled_deliveries.get(idempotency_key)
+            if delivery and delivery.request_hash != request_hash:
+                raise CommandRequestConflict("idempotency key was reused for a different API command")
             if idempotency_key and is_api_write_command(cmd):
-                request_hash = api_request_hash(data)
+                unsettled = unsettled_creations.get(idempotency_key)
+                if unsettled and unsettled.request_hash != request_hash:
+                    raise CommandRequestConflict("idempotency key was reused for a different API command")
                 existing = db.load_mcp_idempotency(idempotency_key)
                 if existing:
                     if (
@@ -603,18 +682,49 @@ def build_http_routes(
                         tool_name=str(cmd or ""),
                         event="dedupe",
                     )
+                    unsettled_creations.pop(idempotency_key, None)
+                    unsettled_deliveries.pop(idempotency_key, None)
                     return web.json_response(cached)
 
-            try:
-                result = await handle_command(data)
-            except Exception as exc:
-                log.exception("API command '%s' failed", cmd)
-                return web.json_response(
-                    {"ok": False, "error": str(exc)}, status=500)
+            creation = None
+            if idempotency_key and cmd in AGENT_CREATION_COMMANDS:
+                creation = unsettled_creations.get(idempotency_key)
+                if creation is None:
+                    creation = CreationOutcome(cmd, idempotency_key, request_hash,
+                                               str(data.get("name", "") or ""))
+                    unsettled_creations[idempotency_key] = creation
+                    await creation.execute(handle_command, data)
+                # Keep the completed operation through verification or receipt
+                # failures. A retry resolves it instead of creating a new target.
+                result = creation.resolve(state, db)
+            elif idempotency_key and cmd in DELIVERY_COMMANDS:
+                delivery = unsettled_deliveries.get(idempotency_key)
+                if delivery is None:
+                    delivery = DeliveryOutcome(cmd, idempotency_key, request_hash)
+                    unsettled_deliveries[idempotency_key] = delivery
+                    await delivery.execute(handle_command, data)
+                result = delivery.resolve()
+            else:
+                try:
+                    result = await handle_command(data)
+                except Exception as exc:
+                    log.exception("API command '%s' failed", cmd)
+                    return web.json_response(
+                        {"ok": False, "error": str(exc)}, status=500)
 
             if result and result.get("type") == "error":
-                return web.json_response(
-                    {"ok": False, "error": result.get("message", "")})
+                refusal = {"ok": False, "error": result.get("message", "")}
+                if delivery is not None:
+                    refusal = delivery.refusal_response(result)
+                    if result.get("delivery_refused") is not True:
+                        db.save_mcp_idempotency(
+                            idempotency_key=idempotency_key, surface="api",
+                            tool_name=cmd, request_hash=request_hash, response=refusal)
+                    unsettled_deliveries.pop(idempotency_key, None)
+                if (cmd == "board_add_task" or creation is not None) and result.get("creation_refused") is True:
+                    refusal["creation_refused"] = True
+                    unsettled_creations.pop(idempotency_key, None)
+                return web.json_response(refusal)
             if result and result.get("type") == "deliverable_missing":
                 # Hard-gate refusal: surface as a CLI/REST failure so the
                 # documented `torque ai done`/`ready` paths see the same outcome
@@ -657,6 +767,9 @@ def build_http_routes(
                     request_hash=request_hash or api_request_hash(data),
                     response=response_payload,
                 )
+            unsettled_deliveries.pop(idempotency_key, None)
+            if creation is not None:
+                unsettled_creations.pop(idempotency_key, None)
             if isinstance(payload, dict) and payload.get("type") == "state":
                 return await _hot_json_response(response_payload)
             return web.json_response(response_payload)
@@ -959,6 +1072,8 @@ def build_http_routes(
 
     return HttpRoutes(
         handle_index=handle_index,
+        handle_legacy=handle_legacy,
+        handle_react_ui=handle_react_ui,
         handle_runtime=handle_runtime,
         handle_ws=handle_ws,
         handle_terminal_ws=handle_terminal_ws,

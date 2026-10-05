@@ -1,0 +1,30 @@
+:root {
+  color-scheme: dark;
+  --font: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  --background: #0d0f13;
+  --surface: #14171d;
+  --surface-raised: #1a1e26;
+  --surface-hover: #20252e;
+  --surface-pressed: #252b36;
+  --border: #282d37;
+  --border-strong: #3a4250;
+  --border-emphasis: #4a5464;
+  --text: #e5e8ee;
+  --text-dim: #929aa8;
+  --text-muted: #606875;
+  --accent: #8da2fb;
+  --accent-contrast: #0d1020;
+  --success: #4ac58b;
+  --warning: #e4ae4f;
+  --danger: #ef6b73;
+  --radius-sm: 4px;
+  --radius: 6px;
+  --radius-lg: 10px;
+  --shadow-md: 0 10px 28px rgb(0 0 0 / 32%);
+  --shadow-lg: 0 24px 72px rgb(0 0 0 / 48%);
+  --focus-ring: 0 0 0 2px color-mix(in srgb, var(--accent) 70%, transparent);
+  --card-padding: 9px;
+  --card-content-gap: 6px;
+  --card-meta-gap: 4px;
+  --card-meta-margin: 7px;
+}

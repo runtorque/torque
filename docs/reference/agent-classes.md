@@ -147,6 +147,13 @@ normalized ACL, authority summary, compiled effective-authority preview, prompt
 summary, apply state, and warnings. They do not expose generated profiles,
 internal class policies, or bucket compatibility fields.
 
+The enriched preview also includes `authoring_definition`, the canonical writable
+class definition. Editors must use its authored ACL rules rather than the
+resolved grants in the compact `acl` preview: a deny-mode grant projection is
+not a deny rule list. Preserve unedited prompt, runtime and metadata fields when
+saving. Stable classes omit draft metadata; draft classes require
+`draft.scratch_only: true`.
+
 ## Prompt composition
 
 Torque builds the base-kind prompt first, then appends the class's structured

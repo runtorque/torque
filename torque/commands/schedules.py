@@ -213,7 +213,7 @@ async def _handle_schedule_command(
                     "auto_sync_excluded_reason": "schedule",
                 })
             if task:
-                await handle_command({
+                await dispatch_command({
                     "cmd": "dispatch_task",
                     "id": task.id,
                     "create_agent": True})
@@ -223,7 +223,7 @@ async def _handle_schedule_command(
                 state._emit("schedule_upsert",
                             **asdict(sched))
                 state._db_save_schedule(sched)
-                _panel_event("schedule_fired", "",
+                panel_event("schedule_fired", "",
                              sched.name, sched.group,
                              title, task_id=task.id)
                 result = {"type": "ok",

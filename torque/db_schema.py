@@ -17,7 +17,7 @@ from typing import Callable, Iterable
 
 from .task_content import compute_task_content_hash
 
-SCHEMA_VERSION = "30"
+SCHEMA_VERSION = "31"
 
 
 @dataclass(frozen=True)
@@ -3152,6 +3152,17 @@ def _migration_0030_per_agent_settings(
     """)
 
 
+def _migration_0031_react_workspace_writers(conn, _backfill_agent_history):
+    # One high-water mark per React window lifetime, retained across snapshots.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS react_workspace_writers (
+            writer_id TEXT PRIMARY KEY,
+            revision INTEGER NOT NULL,
+            preference_json TEXT NOT NULL
+        )
+    """)
+
+
 SCHEMA_MIGRATIONS = (
     SchemaMigration(
         1,
@@ -3374,6 +3385,13 @@ SCHEMA_MIGRATIONS = (
         "per_agent_settings",
         "architect-engineer-per-agent-settings-v1",
         _migration_0030_per_agent_settings,
+        phase="post_init",
+    ),
+    SchemaMigration(
+        31,
+        "react_workspace_writers",
+        "react-workspace-durable-window-revisions-v1",
+        _migration_0031_react_workspace_writers,
         phase="post_init",
     ),
 )

@@ -1,0 +1,73 @@
+name: React UI
+
+on:
+  pull_request:
+    paths:
+      - "ui/**"
+      - "torque/config.py"
+      - "torque/server.py"
+      - "torque/server_routes.py"
+      - "src-tauri/**"
+      - "scripts/assert_community_package_excludes_ee.py"
+      - "scripts/lint_tauri_permissions.py"
+      - "Makefile"
+      - ".github/workflows/ui.yml"
+  push:
+    branches: [main]
+    paths:
+      - "ui/**"
+      - "torque/config.py"
+      - "torque/server.py"
+      - "torque/server_routes.py"
+      - "src-tauri/**"
+      - "scripts/assert_community_package_excludes_ee.py"
+      - "scripts/lint_tauri_permissions.py"
+      - "Makefile"
+      - ".github/workflows/ui.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ui/.nvmrc
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - name: Install locked dependencies
+        run: npm --prefix ui ci
+      - name: Lint, typecheck, and unit test
+        run: npm --prefix ui run check
+      - name: Build and verify production assets
+        run: npm --prefix ui run build
+      - name: Verify daemon routes and protocol catalog
+        run: python3 -m unittest tests.test_react_ui_routes tests.test_react_ui_protocol_catalog tests.test_tauri_security
+      - name: Verify Tauri command permissions
+        run: python3 scripts/lint_tauri_permissions.py
+      - name: Verify fail-closed community package
+        run: python3 -m unittest tests.test_packaging_exclusion
+
+  desktop-check:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install Rust stable
+        run: rustup toolchain install stable --profile minimal
+      - name: Check Rust formatting
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ui/.nvmrc
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - name: Install locked frontend dependencies
+        run: npm --prefix ui ci
+      # Direct cargo commands do not run Tauri's beforeBuildCommand hook.
+      - name: Build frontend assets for the desktop host
+        run: npm --prefix ui run build
+      - name: Test desktop host
+        run: cargo test --manifest-path src-tauri/Cargo.toml --locked

@@ -37,6 +37,8 @@ COMPACT_CARD_FIELDS = {
     "agent_id",
     "assigned_engineer_id",
     "assigned_architect_id",
+    "created_by_architect_id",
+    "created_by_engineer_id",
     "parent_task_id",
     "pipeline_depth",
     "status",
@@ -112,6 +114,8 @@ class CompactSnapshotConsumerTests(unittest.TestCase):
             agent_id="agent-1",
             assigned_engineer_id="eng-1",
             assigned_architect_id="arch-1",
+            created_by_architect_id="arch-creator",
+            created_by_engineer_id="eng-creator",
             created_at="2026-04-21T00:00:00+00:00",
             updated_at="2026-04-22T00:00:00+00:00",
             scheduled_at="2026-04-23T00:00:00+00:00",
@@ -226,6 +230,8 @@ class CompactSnapshotConsumerTests(unittest.TestCase):
         self.assertEqual(card["updated_at"], "2026-04-22T00:00:00+00:00")
         self.assertEqual(card["scheduled_at"], "2026-04-23T00:00:00+00:00")
         self.assertEqual(card["dispatch_state"], "live")
+        self.assertEqual(card["created_by_architect_id"], "arch-creator")
+        self.assertEqual(card["created_by_engineer_id"], "eng-creator")
         self.assertEqual(card["depends_on"], ["task-root"])
         self.assertEqual(card["provider"], "github")
         self.assertEqual(card["external_id"], "123")

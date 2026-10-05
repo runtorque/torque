@@ -655,3 +655,20 @@ test('focused engineer utilities use the focused agent group in multi-project wo
     { cmd: 'engineer_flush_now', group: 'beta' },
   ]);
 });
+
+
+test('React Engineer notification bundles match all five Classic settings', () => {
+  const classicSource = fs.readFileSync(path.join(repoRoot, 'static/js/modals/group-settings.js'), 'utf8');
+  const reactSource = fs.readFileSync(path.join(repoRoot, 'ui/src/features/control/engineerNotificationPresets.ts'), 'utf8');
+  // These are checked-in data constants, evaluated without either application's globals.
+  const classicLiteral = classicSource.match(/const _ENGINEER_NOTIFICATION_PRESETS = ([\s\S]*?\n});/)[1];
+  const reactLiteral = reactSource.match(/export const engineerNotificationPresets = ([\s\S]*?\n});/)[1];
+  const classic = JSON.parse(JSON.stringify(vm.runInNewContext(`(${classicLiteral})`)));
+  const react = JSON.parse(JSON.stringify(vm.runInNewContext(`(${reactLiteral})`)));
+  assert.deepEqual(Object.keys(react), Object.keys(classic));
+  for (const name of Object.keys(classic)) {
+    for (const key of ['digest_verbosity', 'push_interval', 'max_interval', 'heartbeat_interval', 'enabled_events']) {
+      assert.deepEqual(react[name][key], classic[name][key], `${name}.${key}`);
+    }
+  }
+});

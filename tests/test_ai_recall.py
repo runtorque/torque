@@ -536,7 +536,11 @@ class SemanticRecallTests(unittest.IsolatedAsyncioTestCase):
             status="ready",
             rebuild_required=False,
         )
-        delattr(self.state, "ai_recall_sqlite_vec_loader")
+        # Missing-dependency behavior must not depend on optional packages
+        # installed on the machine running the suite.
+        self.state.ai_recall_sqlite_vec_loader = mock.Mock(
+            side_effect=ImportError("sqlite_vec intentionally unavailable"),
+        )
         dependency = await self._call_architect(arch.id, {"query": "x"})
         self.assertEqual(dependency["status"], "dependency_missing")
         self.assertEqual(dependency["results"], [])

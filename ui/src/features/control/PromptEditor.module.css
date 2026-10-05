@@ -1,0 +1,8 @@
+.root { position: relative; min-width: 0; background: var(--background); border-radius: var(--radius-sm); }
+.root > .backdrop, .root > textarea.input { box-sizing: border-box; width: 100%; margin: 0; border: 1px solid transparent; padding: 8px; font: 11px/18px var(--font); font-weight: 400; letter-spacing: normal; tab-size: 4; white-space: pre-wrap; overflow-wrap: break-word; word-break: normal; text-align: left; scrollbar-gutter: stable; }
+.root > .backdrop { position: absolute; inset: 0; height: 100%; overflow: hidden; pointer-events: none; user-select: none; color: var(--text); background: transparent; }
+.root > textarea.input { display: block; position: relative; min-height: 140px; resize: vertical; overflow: auto; border-color: var(--border); border-radius: var(--radius-sm); color: transparent; -webkit-text-fill-color: transparent; caret-color: var(--text); background: transparent; }
+.root > textarea.input::selection { background: color-mix(in srgb, var(--accent) 30%, transparent); }
+.expression { color: var(--accent); }.statement { color: var(--warning); }.comment { color: var(--text-dim); }.string { color: var(--success); }.filter { color: var(--warning); }.paren { color: var(--text); }
+@media (forced-colors: active) { .root > .backdrop { display: none; }.root > textarea.input { color: CanvasText; -webkit-text-fill-color: CanvasText; caret-color: CanvasText; background: Canvas; } }
+@media print { .root > .backdrop { display: none; }.root > textarea.input { color: black; -webkit-text-fill-color: black; } }

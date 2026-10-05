@@ -22,14 +22,23 @@ from ..worktree_streams import (
 )
 from .agent_classes import (
     AGENT_CLASS_COMMAND_NAMES,
+    AGENT_CLASS_STATE_MUTATION_COMMAND_NAMES,
     _AGENT_CLASS_COMMAND_REGISTRY,
 )
 from .behavior_overlays import (
     BEHAVIOR_OVERLAY_READ_COMMAND_NAMES,
     _BEHAVIOR_OVERLAY_READ_COMMAND_REGISTRY,
 )
-from .catalog import CATALOG_COMMAND_NAMES, _CATALOG_COMMAND_REGISTRY
-from .planning import PLANNING_COMMAND_NAMES, _PLANNING_COMMAND_REGISTRY
+from .catalog import (
+    CATALOG_COMMAND_NAMES,
+    CATALOG_STATE_MUTATION_COMMAND_NAMES,
+    _CATALOG_COMMAND_REGISTRY,
+)
+from .planning import (
+    PLANNING_COMMAND_NAMES,
+    PLANNING_MUTATION_COMMAND_NAMES,
+    _PLANNING_COMMAND_REGISTRY,
+)
 from .settings import SETTINGS_READ_COMMAND_NAMES, _SETTINGS_READ_COMMAND_REGISTRY
 
 
@@ -54,6 +63,15 @@ DIRECT_COMMAND_NAMES = frozenset({
     PLANNING_COMMAND_NAMES,
     BEHAVIOR_OVERLAY_READ_COMMAND_NAMES,
     CATALOG_COMMAND_NAMES,
+)
+
+
+DIRECT_STATE_MUTATION_COMMAND_NAMES = frozenset({
+    "generate_daemon_credential",
+}).union(
+    PLANNING_MUTATION_COMMAND_NAMES,
+    AGENT_CLASS_STATE_MUTATION_COMMAND_NAMES,
+    CATALOG_STATE_MUTATION_COMMAND_NAMES,
 )
 
 
@@ -104,7 +122,16 @@ class DirectCommandRuntime:
 async def handle_direct_command(
     data: dict, runtime: DirectCommandRuntime,
 ) -> dict | None:
-    """Execute a command whose response bypasses the mutation broadcast tail."""
+    """Publish direct state mutations before returning their acknowledgement."""
+    result = await _execute_direct_command(data, runtime)
+    if str(data.get("cmd", "") or "").strip() in DIRECT_STATE_MUTATION_COMMAND_NAMES:
+        await runtime.state.broadcast()
+    return result
+
+
+async def _execute_direct_command(
+    data: dict, runtime: DirectCommandRuntime,
+) -> dict | None:
     cmd = str(data.get("cmd", "") or "").strip()
     DATA_DIR = runtime.DATA_DIR
     _agent_overrides_from_role_settings = runtime.agent_overrides_from_role_settings

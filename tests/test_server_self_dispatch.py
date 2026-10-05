@@ -4679,7 +4679,11 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
             "id": worker.id,
         })
 
-        self.assertIsNone(result)
+        self.assertEqual(result['type'], 'worktree_create')
+        self.assertEqual(result['id'], worker.id)
+        self.assertTrue(result['ok'])
+        self.assertTrue(result['created'])
+        self.assertFalse(result['relaunched'])
         self.assertEqual(worker.directory, "/repo/.torque/worktrees/worker")
         self.assertEqual(worker.worktree_path, "/repo/.torque/worktrees/worker")
         self.assertEqual(

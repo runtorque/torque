@@ -115,12 +115,7 @@ def _fresh_reviewer_seat_available(state, group: str) -> bool:
     max_agents = int(getattr(settings, "max_agents", 0) or 0)
     if max_agents <= 0:
         return True
-    current = sum(
-        1 for agent_id in state.groups.get(group, [])
-        if state.agents.get(agent_id)
-        and getattr(state.agents[agent_id], "cell_type", "") == "agent"
-    )
-    return current < max_agents
+    return state.group_agent_count(group) < max_agents
 
 
 def _fresh_reviewer_unavailable_error(state, task, group: str) -> dict:

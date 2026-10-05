@@ -45,6 +45,8 @@ class RuntimePayloadExtensionTests(unittest.TestCase):
         )
         self.assertIn("supervisor", payload)
         self.assertEqual(payload["supervisor"]["state"], "unavailable")
+        self.assertEqual(payload["ui_default"], "react")
+        self.assertEqual(payload["legacy_ui_path"], "/legacy/")
 
     def test_log_tail_parser_paginates_recent_entries(self):
         install_aiohttp_stub()

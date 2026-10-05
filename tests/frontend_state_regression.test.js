@@ -32491,7 +32491,7 @@ test('standalone shell owns the full-width bottom dock rows and drag selector', 
   );
   assert.match(
     html,
-    /<div id="workspace-shell">\s*<div id="app-top-right"[\s\S]*?<\/button>\s*<\/div>\s*<div id="standalone-sidebar-shell">\s*<div id="standalone-main-stack">[\s\S]*?<header>[\s\S]*?<\/header>\s*<div id="app-group-tabs-host" class="agent-group-tabs-host app-group-tabs-host" data-agent-group-tabs-host><\/div>\s*<main id="main"><\/main>\s*<\/div>\s*<div id="standalone-rail-resize-handle"[^>]*><\/div>\s*<aside id="standalone-right-rail"><\/aside>\s*<div id="standalone-bottom-resize-handle"[^>]*><\/div>\s*<section id="standalone-bottom-dock"><\/section>\s*<\/div>\s*<div id="workspace-resize-handle"[^>]*><\/div>\s*<section id="terminal-workspace"><\/section>\s*<\/div>\s*<div id="standalone-float-layer"/s,
+    /<div id="workspace-shell">\s*<div id="app-top-right"[\s\S]*?<\/button>\s*<button id="new-ui-switch"[\s\S]*?<\/button>\s*<\/div>\s*<div id="standalone-sidebar-shell">\s*<div id="standalone-main-stack">[\s\S]*?<header>[\s\S]*?<\/header>\s*<div id="app-group-tabs-host" class="agent-group-tabs-host app-group-tabs-host" data-agent-group-tabs-host><\/div>\s*<main id="main"><\/main>\s*<\/div>\s*<div id="standalone-rail-resize-handle"[^>]*><\/div>\s*<aside id="standalone-right-rail"><\/aside>\s*<div id="standalone-bottom-resize-handle"[^>]*><\/div>\s*<section id="standalone-bottom-dock"><\/section>\s*<\/div>\s*<div id="workspace-resize-handle"[^>]*><\/div>\s*<section id="terminal-workspace"><\/section>\s*<\/div>\s*<div id="standalone-float-layer"/s,
   );
   assert.equal(html.includes('<div id="taskbar">'), false);
   assert.match(
@@ -32606,6 +32606,8 @@ test('Inbox bell has one app-wide top-right host outside column and status chrom
     /#app-top-right\s*\{[^}]*position:\s*absolute;[^}]*top:\s*var\(--space-1\);[^}]*right:\s*var\(--space-2\);[^}]*z-index:\s*50;[^}]*pointer-events:\s*none;/s,
   );
   assert.match(css, /\.inbox-bell-button--app\s*\{[^}]*pointer-events:\s*auto;[^}]*background:\s*var\(--bg-surface\);/s);
+  assert.match(html, /id="new-ui-switch"[\s\S]*?window\.location\.assign\('\/ui-next\/'\)[\s\S]*?>New UI<\/button>/s);
+  assert.match(css, /\.classic-ui-switch\s*\{[^}]*pointer-events:\s*auto;/s);
   assert.match(css, /body\.runtime-embedded #workspace-shell\s*\{[^}]*display:\s*grid;/s,
     'the same app-wide host remains rendered in embedded browser and desktop modes');
   assert.match(css, /body\.detached-window #workspace-shell,[\s\S]*?display:\s*none !important;/s,

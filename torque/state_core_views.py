@@ -6,6 +6,39 @@ from .state import AgentCell, Optional, _safe_float
 
 
 class StateCoreViewsMixin:
+    def _initialize_ui_preferences(self) -> None:
+        """Initialize per-instance persisted workspace and panel preferences."""
+        self.panel_active: str = ""  # '' | 'board' | 'actions' | 'events'
+        self.board_panel_height: int = 0  # 0 = use CSS default
+        # Browser/Tauri UI state mirrored through ui_state so standalone,
+        # desktop, and detached-window sessions restore after daemon restart.
+        self.active_group: str = ""
+        # Legacy principal selector state mirrored through ui_state for older
+        # clients/sessions. Empty string means "user"; architect ids are
+        # persisted but no longer filter the agent grid.
+        self.selected_principal_id: str = ""
+        # Browser-local selectedAgentId mirrored through ui_state so detached
+        # windows can hydrate the same Agent/Context panel focus.
+        self.selected_agent_id: str = ""
+        self.standalone_panel_layout: dict = {}
+        self.detached_panels: dict[str, dict] = {}
+        self.window_bounds: dict[str, dict] = {}
+        self.workspace_sidebar_width: int = 0
+        self.terminal_direct_messages_height: int = 0
+        self.terminal_compose_height: int = 0
+        self.engineer_panel_split_fraction: float = 0.30
+        self.context_panel_split_ratio: float = 0.38
+        self.supervisor_panel_state: dict = {}
+        self.react_workspace_state: dict = {}
+        self.events_dismissed_attention: dict[str, float] = {}
+        self.mission_control_dismissed_cards: dict[str, float] = {}
+        self.board_filters_by_group: dict[str, dict] = {}
+        self.board_selected_lanes_by_group: dict[str, str] = {}
+        self.board_hidden_wide_lanes_by_group: dict[str, dict] = {}
+        self.board_saved_views_by_group: dict[str, list] = {}
+        self.board_lane_sorts_by_group: dict[str, dict] = {}
+        self.board_card_density_by_group: dict[str, str] = {}
+
     @staticmethod
     def agent_is_tombstoned(cell) -> bool:
         """Return True when ``cell`` is inside the soft-delete window."""
@@ -28,6 +61,14 @@ class StateCoreViewsMixin:
         if self.agent_is_tombstoned(cell):
             return None
         return cell
+
+    def group_agent_count(self, group: str) -> int:
+        """Count retained agent seats; terminals and recoverable deletions are free."""
+        return sum(
+            1 for agent_id in self.groups.get(group, [])
+            if (cell := self.get_active_agent(agent_id)) is not None
+            and cell.cell_type == "agent"
+        )
 
     def system_health_metrics(
         self, window: str = "24h", group: str = "", *,

@@ -1,0 +1,10 @@
+{
+  "engineer": {
+    "mandatory": ["task_completed", "agent_reply", "agent_error", "agent_blocked", "ask_created", "task_verification_updated", "worker_boot_doa", "perceived_empty_episode"],
+    "optional": ["agent_started", "task_dispatched", "task_derived", "agent_progress", "task_health_alert"]
+  },
+  "architect": {
+    "mandatory": ["ask_created", "engineer_awaiting_human_input", "agent_error", "agent_blocked", "task_blocked"],
+    "optional": ["task_done", "task_error", "task_ask", "task_derive", "task_completed", "task_derived", "pipeline_complete", "engineer_hired", "engineer_fired", "engineer_dismissed", "engineer_rehired", "workflow_breach", "engineer_queue_empty", "perceived_empty_episode", "engineer_ask_resolved"]
+  }
+}

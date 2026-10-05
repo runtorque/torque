@@ -1,6 +1,7 @@
 import asyncio
 import importlib
 import unittest
+from unittest.mock import Mock
 
 try:
     from helpers import install_aiohttp_stub
@@ -33,6 +34,30 @@ class NotificationManagerTests(unittest.IsolatedAsyncioTestCase):
             notify_on_finish=True,
         )
         return state
+
+    async def test_event_switches_gate_inbox_independently_of_desktop_delivery(self):
+        events = [
+            ("notify_on_finish", "session_end", "notification"),
+            ("notify_on_error", "error", "alert"),
+            ("notify_on_attention", "waiting", "notification"),
+        ]
+        for desktop in (False, True):
+            for enabled in (False, True):
+                for setting, event_type, notice_type in events:
+                    with self.subTest(desktop=desktop, enabled=enabled, event=event_type):
+                        state = self._make_state()
+                        state.group_settings["g"].notifications = desktop
+                        setattr(state.group_settings["g"], setting, enabled)
+                        cell = self.state_mod.AgentCell(id="notice-agent", name="QA", group="g", cell_type="agent")
+                        state.agents[cell.id] = cell
+                        state.publish_operator_notice_best_effort = Mock(return_value={})
+                        manager = self.notifications_mod.NotificationManager(state)
+                        manager.on_event(self.base_mod.AgentEvent(cell_id=cell.id, timestamp=1.0, event_type=event_type))
+                        notices = [call.kwargs for call in state.publish_operator_notice_best_effort.call_args_list]
+                        self.assertEqual(len(notices), int(enabled))
+                        if enabled:
+                            self.assertEqual(notices[0]["notice_type"], notice_type)
+                        self.assertEqual(len(manager._pending), int(enabled and desktop))
 
     async def test_build_body_handles_single_and_grouped_items(self):
         self.assertEqual(

@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from ..config import log
+from .creation_outcomes import record_creation_target
 
 
 class ArchitectGovernanceService:
@@ -108,6 +109,7 @@ class ArchitectGovernanceService:
         """Persist one pending-hire row and emit the matching delta."""
         if self._state.db:
             try:
+                record_creation_target("pending_hire", str(row_dict.get("id", "") or ""))
                 saved = self._state.db.save_pending_hire(row_dict)
                 self._state._emit_pending_hire(saved)
                 return saved
@@ -122,6 +124,7 @@ class ArchitectGovernanceService:
         """Persist one pending-hire row off the event loop."""
         if self._state.db:
             try:
+                record_creation_target("pending_hire", str(row_dict.get("id", "") or ""))
                 saved = await self._state.db.save_pending_hire_async(row_dict)
                 self._state._emit_pending_hire(saved)
                 return saved

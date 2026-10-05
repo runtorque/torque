@@ -13,16 +13,21 @@ gh workflow run release-macos.yml -f version=2.2.0
 
 That single dispatch runs the whole pipeline:
 
-1. **prepare** — stamps the version into every source via
+1. **verify** — runs the locked React checks and build, protocol/route tests,
+   Tauri permission lint, community-package audit, Rust formatting, and desktop
+   tests before any repository mutation.
+2. **prepare** — stamps the version into every source via
    `scripts/set_release_version.py`, commits `Bump version to 2.2.0` to `main`,
    and creates the **annotated** tag `v2.2.0` *on that commit* (the tag always
    points at the fully-bumped tree).
-2. **build** — checks out `v2.2.0` and builds the signed macOS desktop bundle
-   for Apple Silicon and Intel.
-3. **release** — publishes the GitHub Release `v2.2.0` with both-arch
+3. **build** — checks out `v2.2.0` and builds the signed macOS desktop bundle
+   for Apple Silicon and Intel. It verifies the app signature, DMG, zip archive,
+   and per-architecture checksum manifest before upload.
+4. **release** — publishes the GitHub Release `v2.2.0` with both-arch
    `.dmg` / `.app.zip` assets plus `SHA256SUMS`.
 
-`version` is the bare semver (`2.2.0`, no leading `v`). A real cut refuses to
+`version` is exact three-part numeric semver (`2.2.0`, no leading `v` or
+prerelease suffix). A real cut refuses to
 run if the tag already exists — bump to a new version instead.
 
 ## Validate safely first (dry run)
@@ -75,3 +80,6 @@ python3 scripts/set_release_version.py 2.2.0 --check  # verify, no writes
   `APPLE_CERTIFICATE` / `APPLE_ID` / `APPLE_PASSWORD` / `APPLE_TEAM_ID` secrets
   are configured, and fall back to ad-hoc signing without notarization
   otherwise.
+- **Local bundle verification:** on macOS, `make tauri-build-mac` defaults to
+  ad-hoc signing when `APPLE_SIGNING_IDENTITY` is unset and verifies both the
+  app signature and DMG checksum before succeeding.

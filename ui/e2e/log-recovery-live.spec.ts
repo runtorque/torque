@@ -1,0 +1,50 @@
+import { expect, test, type WebSocketRoute } from '@playwright/test';
+type Row = Record<string, unknown>;
+for (const phase of ['request', 'body'] as const) test(`Logs recover a real ${phase} deadline with cursor, reading state and late-response ownership intact`, async ({ page, request }) => {
+  test.setTimeout(50_000);
+  const runtime = (await (await request.get('/api/runtime')).json() as { data: { runtime: Row } }).data.runtime;
+  expect(runtime.port).not.toBe(18932); expect(runtime.profile).not.toBe('default');
+  const endpoint = await request.get('/logs?target=daemon&limit=5'); expect(endpoint.ok()).toBe(true); expect((await endpoint.json() as Row).target).toBe('daemon');
+  const result = await (await request.post('/api/cmd', { data: { cmd: 'ui_set_react_workspace_state', state: { version: 1, activePanel: 'control', controlTab: 'logs' } } })).json() as Row; expect(result.ok).toBe(true);
+  let socket: WebSocketRoute | undefined; let connections = 0; const reads: URL[] = [];
+  await page.routeWebSocket(/\/ws\?/, (client) => { socket = client; connections++; client.connectToServer(); });
+  await page.route('**/logs?*', (route) => {
+    const url = new URL(route.request().url()); reads.push(url); const index = reads.length;
+    return route.fulfill({ json: { target: url.searchParams.get('target'), inode: 'qa-log', size: 100000, cursor: index * 80, lines: Array.from({ length: 80 }, (_, row) => ({ ts: 1700000000 + index * 80 + row, level: 'INFO', message: `retained response ${index} line ${row}` })) } });
+  });
+  await page.addInitScript(() => {
+    const target = window as Window & { qaHoldLog?: 'request' | 'body'; qaLogHeld?: boolean; qaReleaseLog?: () => Promise<void> };
+    const original = window.fetch.bind(window);
+    window.fetch = async (input, options) => {
+      const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url, location.href);
+      if (url.pathname !== '/logs' || !target.qaHoldLog) return original(input, options);
+      const stage = target.qaHoldLog; delete target.qaHoldLog;
+      const response = await original(input, { ...options, signal: null });
+      if (stage === 'request') return new Promise<Response>((resolve) => { target.qaLogHeld = true; target.qaReleaseLog = () => { resolve(response); return Promise.resolve(); }; });
+      const parse = response.json.bind(response);
+      response.json = () => new Promise((resolve, reject) => { target.qaLogHeld = true; target.qaReleaseLog = async () => { try { resolve(await parse()); } catch (error) { reject(error instanceof Error ? error : new Error('Log body fixture failed')); } }; });
+      return response;
+    };
+  });
+  await page.goto('/'); const log = page.getByRole('log', { name: 'daemon log lines' }); await expect(log).toContainText('retained response 1');
+  await page.getByLabel('Follow', { exact: true }).uncheck(); await expect.poll(() => reads.length).toBe(2); await expect(log).toContainText('retained response 2');
+  await page.getByRole('combobox', { name: 'Level', exact: true }).selectOption('INFO'); const search = page.getByRole('textbox', { name: 'Search logs', exact: true }); await search.fill('retained');
+  await log.evaluate((element) => { element.scrollTop = 140; }); const scroll = await log.evaluate((element) => element.scrollTop); expect(scroll).toBeGreaterThan(0);
+  await page.evaluate((stage) => { (window as Window & { qaHoldLog?: string }).qaHoldLog = stage; }, phase);
+  await page.getByRole('button', { name: 'Refresh logs', exact: true }).click(); await expect.poll(() => page.evaluate(() => (window as Window & { qaLogHeld?: boolean }).qaLogHeld)).toBe(true);
+  const expired = reads.length; await search.focus(); await search.evaluate((input: HTMLInputElement) => input.setSelectionRange(2, 5));
+  await expect(page.getByRole('alert')).toContainText('Log refresh timed out', { timeout: 20_000 });
+  await expect(search).toBeFocused(); expect(await search.evaluate((input: HTMLInputElement) => [input.selectionStart, input.selectionEnd])).toEqual([2, 5]);
+  expect(await log.evaluate((element) => element.scrollTop)).toBe(scroll); await expect(page.getByLabel('Follow', { exact: true })).not.toBeChecked(); await expect(page.getByRole('combobox', { name: 'Level', exact: true })).toHaveValue('INFO');
+  await expect(log).toContainText('retained response 1'); await expect(log).not.toContainText(`retained response ${expired}`);
+  await page.screenshot({ path: test.info().outputPath(`logs-${phase}-timeout.png`) });
+  await page.getByRole('button', { name: 'Refresh logs', exact: true }).click(); await expect.poll(() => reads.length).toBe(expired + 1);
+  expect(reads.at(-1)!.searchParams.get('since')).toBe(String((expired - 1) * 80));
+  await expect(log).toContainText(`retained response ${expired + 1}`); await expect(page.getByRole('alert')).toHaveCount(0);
+  await page.evaluate(async () => { await (window as Window & { qaReleaseLog?: () => Promise<void> }).qaReleaseLog?.(); });
+  await expect(log).not.toContainText(`retained response ${expired}`);
+  await search.focus(); const before = connections; await socket!.close({ code: 1012, reason: 'Log recovery reconnect' }); await expect.poll(() => connections).toBeGreaterThan(before);
+  await expect.poll(() => reads.length).toBe(expired + 2); expect(reads.at(-1)!.searchParams.get('since')).toBe(String((expired + 1) * 80));
+  await expect(log).toContainText(`retained response ${expired + 2}`); await expect(search).toBeFocused(); expect(await log.evaluate((element) => element.scrollTop)).toBe(scroll);
+  await page.getByRole('button', { name: /▦ Board/ }).click(); const hidden = reads.length; await page.waitForTimeout(2200); expect(reads).toHaveLength(hidden);
+});

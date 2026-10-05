@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
+import sqlite3
 import time
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
 from ..dispatch_registry import AsyncHandlerRegistry
 from ..state import MatrixState
+from ..ui_preferences import normalize_react_workspace_state
 
 
 UI_STATE_COMMAND_NAMES = frozenset({
@@ -32,6 +37,7 @@ UI_STATE_COMMAND_NAMES = frozenset({
     "ui_set_engineer_panel_split",
     "ui_set_context_panel_split",
     "ui_set_supervisor_panel_state",
+    "ui_set_react_workspace_state",
     "events_dismiss",
     "mission_control_dismiss",
     "board_set_filters",
@@ -157,6 +163,8 @@ def _handle_ui_state_command(data: dict, state: MatrixState):
                     normalized[key] = float(value)
                 except (TypeError, ValueError):
                     continue
+            if isinstance(bounds.get("physical"), bool):
+                normalized["physical"] = bounds["physical"]
             display_id = str(bounds.get("display_id", "") or "").strip()
             if display_id:
                 normalized["display_id"] = display_id
@@ -298,6 +306,8 @@ def _handle_ui_state_command(data: dict, state: MatrixState):
                     normalized_bounds[key] = float(value)
                 except (TypeError, ValueError):
                     continue
+            if isinstance(bounds.get("physical"), bool):
+                normalized_bounds["physical"] = bounds["physical"]
             display_id = str(bounds.get("display_id", "") or "").strip()
             if display_id:
                 normalized_bounds["display_id"] = display_id
@@ -378,7 +388,7 @@ def _handle_ui_state_command(data: dict, state: MatrixState):
             sort_key = str(raw.get("sortKey", "") or "")
             if sort_key not in {
                 "state", "owner", "session", "pid",
-                "command", "bytes", "tty", "path",
+                "command", "bytes", "tty", "path", "started_at",
             }:
                 sort_key = "owner"
             sort_direction = str(
@@ -560,9 +570,65 @@ def _handle_ui_state_command(data: dict, state: MatrixState):
     return result
 
 
+async def _handle_react_workspace_state_command(data: dict, state: MatrixState):
+    preference = normalize_react_workspace_state(data.get("state"))
+    if not preference:
+        return {"type": "error", "message": "Invalid React workspace preference"}
+    if not state.db:
+        return {"type": "error", "message": "Workspace preference storage is unavailable"}
+    ordered = "writer_id" in data or "revision" in data
+    writer_id, revision = data.get("writer_id"), data.get("revision")
+    if ordered:
+        try:
+            valid_writer = isinstance(writer_id, str) and str(uuid.UUID(writer_id)) == writer_id
+        except (ValueError, AttributeError):
+            valid_writer = False
+        if not valid_writer or type(revision) is not int or not 1 <= revision <= 9007199254740991:
+            return {"type": "error", "message": "Invalid workspace save revision"}
+    # The lock includes publication, so a delayed committed operation cannot
+    # publish after a newer one. Keep it through caller cancellation as well.
+    lock = getattr(state, "_react_workspace_save_lock", None)
+    if lock is None:
+        lock = state._react_workspace_save_lock = asyncio.Lock()
+        state._react_workspace_save_tasks = set()
+
+    async def persist():
+        async with lock:
+            try:
+                outcome = "applied"
+                if ordered:
+                    outcome = await state.db.save_ordered_react_workspace_state_durable(writer_id, revision, preference)
+                else:
+                    await state.db.save_ui_state_durable("react_workspace_state", json.dumps(preference))
+            except (sqlite3.Error, OSError, RuntimeError):
+                logging.getLogger(__name__).exception("Failed to persist React workspace preference")
+                return {"type": "error", "message": "Workspace preference could not be saved"}
+            if outcome in {"superseded", "conflict"}:
+                return {"type": "error", "message": "Workspace save revision was superseded or reused with different navigation"}
+            if outcome == "applied":
+                state.react_workspace_state = preference
+                state._emit("ui_update", key="react_workspace_state", value=preference)
+                await state.broadcast()
+            frame = {"type": "react_workspace_state", "state": preference}
+            if ordered:
+                frame.update(writer_id=writer_id, revision=revision)
+            return frame
+
+    task = asyncio.create_task(persist())
+    state._react_workspace_save_tasks.add(task)
+    task.add_done_callback(state._react_workspace_save_tasks.discard)
+    return await asyncio.shield(task)
+
+
 _UI_STATE_COMMAND_REGISTRY = AsyncHandlerRegistry()
 _UI_STATE_COMMAND_REGISTRY.register_many(
-    UI_STATE_COMMAND_NAMES,
+    UI_STATE_COMMAND_NAMES - {"ui_set_react_workspace_state"},
     _handle_ui_state_command,
     label="ui_state",
+)
+
+_UI_STATE_COMMAND_REGISTRY.register_many(
+    {"ui_set_react_workspace_state"},
+    _handle_react_workspace_state_command,
+    label="react_workspace_state",
 )

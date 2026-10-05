@@ -27,6 +27,8 @@ class MakefileInstallTests(unittest.TestCase):
             f"{command_key}={self._footer_command(source)}",
             *[f"{key}={value}" for key, value in variables.items()],
         ]
+        if target == "test-ee":
+            arguments.append("TEST_EE_REQUIRE_CHECKOUT=0")
         return subprocess.run(
             arguments, cwd=ROOT, text=True, capture_output=True, env=env,
         )
@@ -181,6 +183,21 @@ class MakefileInstallTests(unittest.TestCase):
 
         self.assertIn('profile="qa-profile"', proc.stdout)
 
+    def test_tauri_mac_bundle_defaults_to_ad_hoc_signing_and_verifies_artifacts(self):
+        proc = self._run_make_dry("tauri-build-mac")
+
+        self.assertIn('APPLE_SIGNING_IDENTITY="${APPLE_SIGNING_IDENTITY:--}"', proc.stdout)
+        self.assertIn("cargo tauri build --bundles app,dmg", proc.stdout)
+        self.assertIn("codesign --verify --deep --strict --verbose=2", proc.stdout)
+        self.assertIn("hdiutil verify", proc.stdout)
+
+    def test_open_targets_react_root_and_named_classic_fallback(self):
+        primary = self._run_make_dry("open", "TORQUE_PORT=19001")
+        legacy = self._run_make_dry("open-legacy", "TORQUE_PORT=19001")
+
+        self.assertIn('open "http://127.0.0.1:19001/"', primary.stdout)
+        self.assertIn('open "http://127.0.0.1:19001/legacy/"', legacy.stdout)
+
     def test_removed_toolbelt_make_targets_not_advertised_in_first_party_docs(self):
         stale_target_re = re.compile(
             r"deploy-toolbelt|run-toolbelt|install-toolbelt|toolbelt-legacy|"
@@ -231,8 +248,12 @@ print(config.LOG_FILE)
                 "TORQUE_DATA_DIR": str(live_log.parent),
                 "TORQUE_PROFILE": "default",
             })
+            # A virtualenv intentionally disables user-site imports. Exercise the
+            # base interpreter here because preserving user-site packages is the
+            # behavior under test, regardless of the suite's chosen interpreter.
+            fixture_python = getattr(sys, "_base_executable", sys.executable)
             user_site = Path(subprocess.check_output(
-                [sys.executable, "-c", "import site; print(site.getusersitepackages())"],
+                [fixture_python, "-c", "import site; print(site.getusersitepackages())"],
                 text=True,
                 env=env,
             ).strip())
@@ -242,14 +263,14 @@ print(config.LOG_FILE)
             )
             fixture_b64 = base64.b64encode(fixture.encode("utf-8")).decode("ascii")
             fixture_command = (
-                f'{sys.executable} -c "import base64; exec(compile('
+                f'{shlex.quote(fixture_python)} -c "import base64; exec(compile('
                 f'base64.b64decode(\'{fixture_b64}\'), \'<fixture>\', \'exec\'))"'
             )
             proc = subprocess.run(
                 [
                     "make",
                     "test",
-                    f"TEST_PYTHON={sys.executable}",
+                    f"TEST_PYTHON={fixture_python}",
                     f"TEST_COMMAND={fixture_command}",
                 ],
                 cwd=ROOT,
@@ -267,7 +288,7 @@ print(config.LOG_FILE)
     def test_test_targets_allocate_disposable_home_and_data_dirs(self):
         for target in ("test", "test-ee"):
             with self.subTest(target=target):
-                proc = self._run_make_dry(target)
+                proc = self._run_make_dry(target, "TEST_PYTHON=python3")
                 self.assertIn('scratch_root=$(mktemp -d "${TMPDIR:-/tmp}/torque-test.XXXXXX")', proc.stdout)
                 self.assertIn('HOME="$scratch_root/home"', proc.stdout)
                 self.assertIn('TORQUE_DATA_DIR="$scratch_root/profile"', proc.stdout)

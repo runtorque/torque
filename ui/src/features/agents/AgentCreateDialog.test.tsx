@@ -1,0 +1,282 @@
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { Provider } from 'react-redux';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { connectionActions, createAppStore, projectionActions } from '../../app/store';
+import { compactStateFixture } from '../../protocol/fixtures';
+import type { TorqueCommand, UnknownRecord } from '../../protocol';
+import { AgentCreateDialog } from './AgentCreateDialog';
+import { toAgentViewModel } from './model';
+const response = (data: UnknownRecord) => ({ ok: true, json: () => Promise.resolve({ ok: true, data }) });
+const rendered = (name = '', config: UnknownRecord = {}) => response({ type: 'template_rendered', group: 'Foundation', name, config });
+function setup(kind: 'worker' | 'architect' | 'engineer' | 'terminal' = 'worker') {
+  const store = createAppStore(); store.dispatch(connectionActions.connected({ at: 1, reconnect: false }));
+  const close = vi.fn(); const created = vi.fn();
+  const content = () => <Provider store={store}><AgentCreateDialog open initialKind={kind} group="Foundation" agents={[toAgentViewModel('arch', { kind: 'architect', name: 'Architect', group: 'Foundation' })]} onClose={close} onCreated={created} /></Provider>;
+  const view = render(content());
+  return { store, close, created, refreshCatalog: () => { act(() => { store.dispatch(projectionActions.auxiliaryResourceReceived({ type: 'roles', group: 'Other', roles: [{ name: 'foreign' }] })); }); }, ...view };
+}
+const ready = () => waitFor(() => { expect(screen.queryByText('Resolving launch settings…')).not.toBeInTheDocument(); expect(screen.queryByText('Loading project Agent Classes…')).not.toBeInTheDocument(); });
+const classResponse = () => response({ type: 'agent_classes', group: 'Foundation', classes: [{ id: 'worker-class', name: 'Worker Class', base_kind: 'worker', launchable: true }], issues: [] });
+const mockFetch = (handler: (url: string, options: RequestInit) => unknown) => vi.fn((url: string, options: RequestInit) => commandFrom(options).cmd === 'list_roles' ? Promise.resolve(response({ type: 'roles', group: 'Foundation', roles: [{ name: 'build', display_name: 'Project build' }, { name: 'build', display_name: 'Shadowed global build' }, { name: 'review' }] })) : commandFrom(options).cmd === 'agent_class_list' ? Promise.resolve(classResponse()) : handler(url, options));
+const commandFrom = (options: RequestInit) => JSON.parse(typeof options.body === 'string' ? options.body : '{}') as TorqueCommand;
+afterEach(() => vi.unstubAllGlobals());
+describe('agent creation', () => {
+  it.each(['worker', 'engineer', 'architect'] as const)('retains the %s draft when capacity fills, blocks submission, and resumes after deletion', async (kind) => {
+    const calls: TorqueCommand[] = [];
+    vi.stubGlobal('fetch', mockFetch((_url, options) => {
+      const command = commandFrom(options); calls.push(command);
+      return Promise.resolve(command.cmd === 'render_template' ? rendered() : response({ id: 'created', kind, name: 'Retained draft' }));
+    }));
+    const { store, close } = setup(kind); await ready();
+    const name = screen.getByLabelText<HTMLInputElement>('Name');
+    fireEvent.change(name, { target: { value: 'Retained draft' } }); name.focus(); name.setSelectionRange(3, 7);
+    const snapshot = (deleted_at = 0) => { act(() => { store.dispatch(projectionActions.snapshotReceived({ ...compactStateFixture, agents: { full: { kind: 'worker', group: 'Foundation', deleted_at } }, group_settings: { Foundation: { max_agents: 1 } } })); }); };
+    snapshot();
+    expect(screen.getByText(/Agent limit reached/)).toHaveTextContent('1/1');
+    expect(screen.getByRole('button', { name: `Create ${kind}` })).toBeDisabled();
+    expect(name).toHaveFocus(); expect(name.selectionStart).toBe(3); expect(name.selectionEnd).toBe(7);
+    fireEvent.submit(name.closest('form')!); expect(calls.filter((call) => call.cmd !== 'render_template')).toHaveLength(0);
+    snapshot(123); await ready();
+    expect(name).toHaveValue('Retained draft');
+    fireEvent.click(screen.getByRole('button', { name: `Create ${kind}` }));
+    await waitFor(() => expect(close).toHaveBeenCalledOnce());
+  });
+  it.each(['terminal', 'hire'] as const)('allows a %s at the agent limit', async (target) => {
+    vi.stubGlobal('fetch', mockFetch(() => Promise.resolve(target === 'hire' ? response({ hire_id: 'hire', status: 'pending' }) : response({ type: 'terminal_created', id: 'terminal', kind: 'terminal', name: 'Allowed', parent_id: '' }))));
+    const { store, close } = setup(target === 'hire' ? 'engineer' : 'terminal');
+    act(() => { store.dispatch(projectionActions.snapshotReceived({ ...compactStateFixture, group_settings: { Foundation: { max_agents: 1 } } })); });
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Allowed' } });
+    if (target === 'hire') fireEvent.change(screen.getByLabelText('Hiring Architect'), { target: { value: 'arch' } });
+    expect(screen.queryByText(/Agent limit reached/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: target === 'hire' ? 'Request hire' : 'Create terminal' }));
+    await waitFor(() => expect(close).toHaveBeenCalledOnce());
+  });
+
+  it.each(['worker', 'architect', 'engineer', 'terminal'] as const)('acknowledges %s creation before closing and selects the returned target', async (kind) => {
+    const calls: TorqueCommand[] = [];
+    vi.stubGlobal('fetch', mockFetch((_url: string, options: RequestInit) => {
+      const command = commandFrom(options); calls.push(command);
+      return Promise.resolve(command.cmd === 'render_template' ? rendered() : response({ type: kind === 'terminal' ? 'terminal_created' : 'ok', id: 'created', kind, name: 'New target', group: 'Foundation', parent_id: '' }));
+    }));
+    const { close, created } = setup(kind); await ready();
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: '  New target  ' } }); fireEvent.click(screen.getByRole('button', { name: `Create ${kind}` }));
+    await waitFor(() => expect(close).toHaveBeenCalledOnce()); expect(created).toHaveBeenCalledWith('created');
+    expect(calls.find((command) => command.cmd !== 'render_template')).toMatchObject({ cmd: `add_${kind}`, group: 'Foundation', name: 'New target', idempotency_key: expect.any(String) as unknown });
+  });
+  it.each(['engineer', 'architect'] as const)('omits unsupported worktree controls and hidden worker drafts when creating %s', async (kind) => {
+    const calls: TorqueCommand[] = [];
+    vi.stubGlobal('fetch', mockFetch((_url, options) => {
+      const command = commandFrom(options); calls.push(command);
+      return Promise.resolve(command.cmd === 'render_template' ? rendered('', { worktree: true, worktree_base_branch: 'main' }) : response({ type: 'ok', id: 'principal', name: 'Principal', kind, group: 'Foundation' }));
+    }));
+    const { close } = setup('worker'); await ready();
+    expect(screen.getByLabelText('Create an isolated worktree')).toBeChecked();
+    fireEvent.change(screen.getByLabelText('Worktree name'), { target: { value: 'worker-only' } });
+    fireEvent.change(screen.getByLabelText('Base directory'), { target: { value: '/worker/worktrees' } });
+    fireEvent.change(screen.getByLabelText('Agent kind'), { target: { value: kind } }); await ready();
+    expect(screen.queryByLabelText('Create an isolated worktree')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Base directory')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Checkpoint on stop')).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Principal' } });
+    fireEvent.click(screen.getByRole('button', { name: `Create ${kind}` }));
+    await waitFor(() => expect(close).toHaveBeenCalledOnce());
+    const submitted = calls.find((call) => call.cmd === `add_${kind}`)!;
+    expect(submitted).toBeDefined();
+    for (const key of ['worktree', 'worktree_base_dir', 'worktree_base_branch', 'worktree_name', 'worktree_auto_checkpoint', 'checkpoint_on_progress', 'worktree_merge_squash']) expect(submitted).not.toHaveProperty(key);
+  });
+  it('retains worker worktree edits while another creation kind hides them', async () => {
+    vi.stubGlobal('fetch', mockFetch(() => Promise.resolve(rendered('', { worktree: true, worktree_base_branch: 'main' }))));
+    setup('worker'); await ready();
+    fireEvent.change(screen.getByLabelText('Worktree name'), { target: { value: 'retained-worker-tree' } });
+    fireEvent.change(screen.getByLabelText('Base branch'), { target: { value: 'release' } });
+    fireEvent.change(screen.getByLabelText('Agent kind'), { target: { value: 'engineer' } });
+    expect(screen.queryByLabelText('Worktree name')).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Agent kind'), { target: { value: 'worker' } }); await ready();
+    expect(screen.getByLabelText('Create an isolated worktree')).toBeChecked();
+    expect(screen.getByLabelText('Worktree name')).toHaveValue('retained-worker-tree');
+    expect(screen.getByLabelText('Base branch')).toHaveValue('release');
+  });
+  it('guards pending dismissal and repeats, retains refused drafts and reuses the same retry identity', async () => {
+    const calls: TorqueCommand[] = []; let release: (value: UnknownRecord) => void = () => { throw new Error('not pending'); };
+    vi.stubGlobal('fetch', mockFetch((_url: string, options: RequestInit) => {
+      calls.push(commandFrom(options)); return new Promise((resolve) => { release = (value) => resolve({ ok: true, json: () => Promise.resolve(value) }); });
+    }));
+    const { close, created } = setup('engineer'); fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Draft' } }); fireEvent.change(screen.getByLabelText('Custom instructions'), { target: { value: 'Keep this' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create engineer' }));
+    expect(screen.getByRole('button', { name: 'Creating…' })).toBeDisabled(); expect(screen.getByLabelText('Name')).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Close dialog' })); fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' }); fireEvent.submit(screen.getByLabelText('Name').closest('form')!);
+    expect(close).not.toHaveBeenCalled(); expect(calls).toHaveLength(1);
+    await act(async () => { release({ ok: false, error: 'Duplicate name' }); await Promise.resolve(); });
+    expect(await screen.findByRole('alert')).toHaveTextContent('Duplicate name'); expect(screen.getByLabelText('Custom instructions')).toHaveValue('Keep this');
+    fireEvent.click(screen.getByRole('button', { name: 'Retry same creation' })); expect(calls[1]).toEqual(calls[0]);
+    await act(async () => { release({ ok: true, data: { id: 'eng', name: 'Draft', kind: 'engineer' } }); await Promise.resolve(); });
+    expect(close).toHaveBeenCalledOnce(); expect(created).toHaveBeenCalledWith('eng');
+  });
+  it('rejects mismatched acknowledgement and freezes the reviewed request for exact recovery', async () => {
+    const calls: TorqueCommand[] = [];
+    vi.stubGlobal('fetch', mockFetch((_url: string, options: RequestInit) => { calls.push(commandFrom(options)); return Promise.resolve(response({ id: 'wrong', name: 'Wrong name', kind: 'worker' })); }));
+    const { store, close } = setup('architect'); fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Original' } }); fireEvent.click(screen.getByRole('button', { name: 'Create architect' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not confirm'); expect(close).not.toHaveBeenCalled();
+    act(() => { store.dispatch(projectionActions.snapshotReceived({ ...compactStateFixture, group_settings: { Foundation: { max_agents: 1 } } })); });
+    expect(screen.queryByText(/Agent limit reached/)).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Name')).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry same creation' }));
+    await waitFor(() => expect(calls).toHaveLength(2)); expect(calls[1]).toEqual(calls[0]);
+  });
+  it('requires the nested Agent Class creation acknowledgement', async () => {
+    let last: TorqueCommand | undefined;
+    vi.stubGlobal('fetch', mockFetch((_url: string, options: RequestInit) => { const command = commandFrom(options); if (command.cmd !== 'render_template') last = command; return Promise.resolve(command.cmd === 'render_template' ? rendered() : response({ type: 'agent_class_launch', base_kind: 'worker', agent: { id: 'class-agent', name: 'From class', kind: 'worker' } })); }));
+    const { close, created } = setup(); await ready(); fireEvent.change(screen.getByLabelText('Agent Class'), { target: { value: 'worker-class' } }); fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'From class' } }); fireEvent.click(screen.getByRole('button', { name: 'Create worker' }));
+    await waitFor(() => expect(close).toHaveBeenCalledOnce()); expect(last).toMatchObject({ cmd: 'create_agent_from_class', class_id: 'worker-class', kind: 'worker' }); expect(created).toHaveBeenCalledWith('class-agent');
+  });
+  it('acknowledges a pending hire without claiming an Engineer already exists', async () => {
+    let last: TorqueCommand | undefined;
+    vi.stubGlobal('fetch', mockFetch((_url: string, options: RequestInit) => { last = commandFrom(options); return Promise.resolve(response({ hire_id: 'hire-1', status: 'pending' })); }));
+    const { close, created } = setup('engineer'); fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Requested' } }); fireEvent.change(screen.getByLabelText('Hiring Architect'), { target: { value: 'arch' } }); fireEvent.change(screen.getByLabelText('Specializations'), { target: { value: 'frontend, ui-ux' } });
+    expect(screen.getByText('The Engineer is created after approval in Planning.')).toBeVisible(); fireEvent.click(screen.getByRole('button', { name: 'Request hire' }));
+    await waitFor(() => expect(close).toHaveBeenCalledOnce()); expect(last).toMatchObject({ cmd: 'architect_engineer_hire', architect_id: 'arch', specializations: ['frontend', 'ui-ux'] }); expect(created).not.toHaveBeenCalled();
+  });
+  it.each(['worker', 'engineer', 'architect', 'terminal'] as const)('limits startup arguments and initialization controls to terminals when creating %s', async (kind) => {
+    vi.stubGlobal('fetch', mockFetch(() => Promise.resolve(rendered())));
+    setup(kind); await ready();
+    for (const label of ['Command arguments', 'Initialization script']) {
+      if (kind === 'terminal') expect(screen.getByLabelText(label)).toBeVisible();
+      else expect(screen.queryByLabelText(label)).not.toBeInTheDocument();
+    }
+    if (kind === 'terminal') expect(screen.queryByLabelText('Icon')).not.toBeInTheDocument();
+    else expect(screen.getByLabelText('Icon')).toBeVisible();
+  });
+  it('does not submit hidden terminal startup drafts after switching to a principal', async () => {
+    let submitted: TorqueCommand | undefined;
+    vi.stubGlobal('fetch', mockFetch((_url, options) => { submitted = commandFrom(options); return Promise.resolve(response({ id: 'engineer', kind: 'engineer', name: 'Principal' })); }));
+    const { close } = setup('terminal'); await ready();
+    fireEvent.change(screen.getByLabelText('Command arguments'), { target: { value: '--terminal-only' } });
+    fireEvent.change(screen.getByLabelText('Initialization script'), { target: { value: '/tmp/terminal-only.sh' } });
+    fireEvent.change(screen.getByLabelText('Agent kind'), { target: { value: 'engineer' } }); await ready();
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Principal' } }); fireEvent.click(screen.getByRole('button', { name: 'Create engineer' }));
+    await waitFor(() => expect(close).toHaveBeenCalledOnce()); expect(submitted).not.toHaveProperty('command_args'); expect(submitted).not.toHaveProperty('init_script');
+  });
+  it('requests worker defaults and submits the reviewed raw launch values without constructing command flags', async () => {
+    const calls: TorqueCommand[] = [];
+    vi.stubGlobal('fetch', mockFetch((_url, options) => {
+      const command = commandFrom(options); calls.push(command);
+      return Promise.resolve(command.cmd === 'render_template' ? rendered('', { provider: 'generic', command: '/bin/cat worker', model: 'worker-model', reasoning_effort: 'high', fast_mode: 'off' }) : response({ id: 'worker', name: 'Worker defaults', kind: 'worker' }));
+    }));
+    const { close } = setup(); await ready();
+    expect(calls[0]).toMatchObject({ cmd: 'render_template', kind: 'worker', group: 'Foundation' });
+    expect(screen.getByLabelText('Boot command')).toHaveValue('/bin/cat worker');
+    expect(screen.getByLabelText('Model')).toHaveValue('worker-model');
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Worker defaults' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create worker' }));
+    await waitFor(() => expect(close).toHaveBeenCalledOnce());
+    expect(calls.at(-1)).toMatchObject({ command: '/bin/cat worker', model: 'worker-model', reasoning_effort: 'high', fast_mode: 'off' });
+  });
+  it('loads resolved template fields, preserving explicit overrides across selection and reconnect', async () => {
+    const calls: TorqueCommand[] = [];
+    vi.stubGlobal('fetch', mockFetch((_url: string, options: RequestInit) => { const command = commandFrom(options); calls.push(command); return Promise.resolve(rendered(String(command.name), { provider: 'generic', command: '/bin/cat', model: command.name || 'group-model', shell: 'bash', env_vars: { MODE: 'qa' }, worktree: true, worktree_base_branch: 'main', worktree_merge_squash: false })); }));
+    const { store, refreshCatalog } = setup(); await ready();
+    expect(screen.getByLabelText('Provider')).toHaveValue('generic'); expect(screen.getByLabelText('Environment variables')).toHaveValue('MODE=qa'); expect(screen.getByLabelText('Create an isolated worktree')).toBeChecked(); expect(screen.getByLabelText('Squash merge')).not.toBeChecked();
+    const model = screen.getByLabelText<HTMLInputElement>('Model'); fireEvent.change(model, { target: { value: 'explicit-model' } }); model.focus(); model.setSelectionRange(1, 4);
+    fireEvent.change(screen.getByLabelText('Role / template'), { target: { value: 'build' } }); await ready(); expect(model).toHaveValue('explicit-model'); expect(model).toHaveFocus(); expect([model.selectionStart, model.selectionEnd]).toEqual([1, 4]);
+    expect(screen.getByRole('option', { name: 'Project build' })).toBeInTheDocument(); expect(screen.queryByRole('option', { name: 'Shadowed global build' })).not.toBeInTheDocument();
+    refreshCatalog(); expect(screen.getByLabelText('Role / template')).toHaveValue('build');
+    act(() => { store.dispatch(connectionActions.connected({ at: 2, reconnect: true })); }); await ready(); expect(model).toHaveValue('explicit-model'); expect(calls).toHaveLength(3);
+  });
+  it('ignores aborted template replies, blocks failed resolution and retries in place', async () => {
+    const reads: { command: TorqueCommand; signal: AbortSignal; resolve: (response: ReturnType<typeof rendered>) => void }[] = [];
+    vi.stubGlobal('fetch', mockFetch((_url: string, options: RequestInit) => new Promise((resolve) => reads.push({ command: commandFrom(options), signal: options.signal!, resolve }))));
+    const { unmount } = setup(); fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Draft' } });
+    await screen.findByRole('option', { name: 'review' }); fireEvent.change(screen.getByLabelText('Role / template'), { target: { value: 'review' } }); expect(reads[0]!.signal.aborted).toBe(true);
+    await act(async () => { reads[1]!.resolve(rendered('wrong')); await Promise.resolve(); });
+    expect(await screen.findByRole('alert')).toHaveTextContent('did not match'); expect(screen.getByRole('button', { name: 'Create worker' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry launch settings' }));
+    await act(async () => { reads[2]!.resolve(rendered('review', { model: 'review-model' })); await Promise.resolve(); });
+    await act(async () => { reads[0]!.resolve(rendered('', { model: 'stale' })); await Promise.resolve(); });
+    expect(screen.getByLabelText('Model')).toHaveValue('review-model'); expect(screen.getByLabelText('Name')).toHaveValue('Draft'); expect(screen.getByRole('button', { name: 'Create worker' })).toBeEnabled(); fireEvent.change(screen.getByLabelText('Role / template'), { target: { value: 'build' } }); unmount(); expect(reads[3]!.signal.aborted).toBe(true);
+  });
+});
+
+it('uses group specialization defaults until explicitly edited, including an intentional empty selection', async () => {
+  const calls: TorqueCommand[] = [];
+  vi.stubGlobal('fetch', mockFetch((_url, options) => { calls.push(commandFrom(options)); return Promise.resolve(response({ type: 'ok', id: 'created', kind: 'engineer', name: 'Default engineer', group: 'Foundation' })); }));
+  const { store, close } = setup('engineer'); await ready();
+  act(() => { store.dispatch(projectionActions.snapshotReceived({ ...compactStateFixture, group_settings: { Foundation: { default_engineer_specializations: ['frontend'] } } })); });
+  expect(screen.getByRole('listitem')).toHaveTextContent('frontend · Primary');
+  act(() => { store.dispatch(projectionActions.deltaReceived({ type: 'delta', seq: 11, ops: [{ op: 'group_settings_update', name: 'Foundation', default_engineer_specializations: ['backend'] }] })); });
+  expect(screen.getByRole('listitem')).toHaveTextContent('backend · Primary');
+  fireEvent.click(screen.getByRole('button', { name: 'Remove backend' }));
+  act(() => { store.dispatch(projectionActions.deltaReceived({ type: 'delta', seq: 12, ops: [{ op: 'group_settings_update', name: 'Foundation', default_engineer_specializations: ['frontend'] }] })); });
+  expect(screen.queryByRole('listitem')).not.toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Default engineer' } }); fireEvent.click(screen.getByRole('button', { name: 'Create engineer' }));
+  await waitFor(() => expect(close).toHaveBeenCalledOnce()); expect(calls.find((call) => call.cmd === 'add_engineer')).toMatchObject({ specializations: [] });
+});
+it('stages a notification preset for creation and preserves an explicitly empty event override', async () => {
+  const calls: TorqueCommand[] = [];
+  vi.stubGlobal('fetch', mockFetch((_url, options) => { calls.push(commandFrom(options)); return Promise.resolve(response({ type: 'ok', id: 'created', kind: 'engineer', name: 'Quiet engineer', group: 'Foundation' })); }));
+  const { close } = setup('engineer'); await ready();
+  fireEvent.change(screen.getByRole('combobox', { name: 'Engineer notification preset' }), { target: { value: 'quiet' } });
+  expect(screen.getByLabelText('Heartbeat interval')).toHaveValue(0); expect(screen.getByLabelText('Digest verbosity')).toHaveValue('compact');
+  fireEvent.change(screen.getByLabelText('Enabled digest events'), { target: { value: '' } }); expect(screen.getByRole('combobox', { name: 'Engineer notification preset' })).toHaveValue('custom');
+  fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Quiet engineer' } }); fireEvent.click(screen.getByRole('button', { name: 'Create engineer' }));
+  await waitFor(() => expect(close).toHaveBeenCalledOnce()); expect(calls.find((call) => call.cmd === 'add_engineer')).toMatchObject({ agent_digest_settings: { digest_verbosity: 'compact', push_interval: 120, max_interval: 600, heartbeat_interval: 0, enabled_events: [] } });
+});
+
+it.each(['worker', 'architect', 'engineer', 'terminal'] as const)('preserves exact environment values when creating a %s', async (kind) => {
+  const calls: TorqueCommand[] = [];
+  vi.stubGlobal('fetch', mockFetch((_url, options) => {
+    const command = commandFrom(options); calls.push(command);
+    return Promise.resolve(command.cmd === 'render_template' ? rendered() : response({ type: kind === 'terminal' ? 'terminal_created' : 'ok', id: 'created', kind, name: 'Environment target', group: 'Foundation', parent_id: '' }));
+  }));
+  const { close } = setup(kind); await ready();
+  fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Environment target' } });
+  fireEvent.change(screen.getByLabelText('Environment variables'), { target: { value: '  # comment\n QA_SPACES =  exact value  \nQA_EQUALS=a=b=c\nQA_EMPTY=\nQA_ONLY_SPACES=   \ninvalid line' } });
+  fireEvent.click(screen.getByRole('button', { name: `Create ${kind}` }));
+  await waitFor(() => expect(close).toHaveBeenCalledOnce());
+  expect(calls.find((command) => command.cmd === `add_${kind}`)?.env_vars).toEqual({ QA_SPACES: '  exact value  ', QA_EQUALS: 'a=b=c', QA_EMPTY: '', QA_ONLY_SPACES: '   ' });
+});
+
+it('launches untouched resolved environment values without trimming them', async () => {
+  const environment = { QA_SPACES: '  inherited value  ', QA_EMPTY: '', QA_EQUALS: 'a=b=c' }; const calls: TorqueCommand[] = [];
+  vi.stubGlobal('fetch', mockFetch((_url, options) => {
+    const command = commandFrom(options); calls.push(command);
+    return Promise.resolve(command.cmd === 'render_template' ? rendered('', { env_vars: environment }) : response({ type: 'ok', id: 'created', kind: 'worker', name: 'Inherited environment', group: 'Foundation' }));
+  }));
+  const { close } = setup(); await ready(); fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Inherited environment' } }); fireEvent.click(screen.getByRole('button', { name: 'Create worker' }));
+  await waitFor(() => expect(close).toHaveBeenCalledOnce()); expect(calls.find((command) => command.cmd === 'add_worker')?.env_vars).toEqual(environment);
+});
+
+it('suggests unused terminal names across groups and preserves edits and explicit clearing through refreshed defaults', () => {
+  const { store } = setup('terminal');
+  act(() => { store.dispatch(projectionActions.snapshotReceived({ ...compactStateFixture, agents: { one: { id: 'one', name: 'Console 1', group: 'Foundation', kind: 'terminal' }, peer: { id: 'peer', name: 'Console 2', group: 'Other', kind: 'terminal' } }, group_settings: { Foundation: { terminal_name_prefix: 'Console' } } })); });
+  const input = screen.getByLabelText<HTMLInputElement>('Name'); expect(input).toHaveValue('Console 3');
+  fireEvent.change(input, { target: { value: 'My terminal' } }); input.focus(); input.setSelectionRange(2, 5);
+  act(() => { store.dispatch(projectionActions.auxiliaryResourceReceived({ type: 'group_settings', group: 'Foundation', settings: { terminal_name_prefix: 'Changed' } })); store.dispatch(connectionActions.connected({ at: 2, reconnect: true })); });
+  expect(screen.getByLabelText('Name')).toBe(input); expect(input).toHaveValue('My terminal'); expect(input).toHaveFocus(); expect([input.selectionStart, input.selectionEnd]).toEqual([2, 5]);
+  fireEvent.change(input, { target: { value: '' } });
+  act(() => { store.dispatch(projectionActions.auxiliaryResourceReceived({ type: 'group_settings', group: 'Foundation', settings: { terminal_name_prefix: 'Another' } })); });
+  expect(input).toHaveValue(''); expect(screen.getByRole('button', { name: 'Create terminal' })).toBeDisabled();
+});
+
+it('uses terminal prefixes only for terminals and keeps absent prefixes unnamed', async () => {
+  vi.stubGlobal('fetch', mockFetch(() => Promise.resolve(rendered())));
+  const { store } = setup('terminal'); expect(screen.getByLabelText('Name')).toHaveValue('');
+  act(() => { store.dispatch(projectionActions.auxiliaryResourceReceived({ type: 'group_settings', group: 'Foundation', settings: { terminal_name_prefix: 'Console' } })); });
+  expect(screen.getByLabelText('Name')).toHaveValue('Console 1');
+  fireEvent.change(screen.getByLabelText('Agent kind'), { target: { value: 'worker' } }); await ready(); expect(screen.getByLabelText('Name')).toHaveValue('');
+  fireEvent.change(screen.getByLabelText('Agent kind'), { target: { value: 'terminal' } }); expect(screen.getByLabelText('Name')).toHaveValue('Console 1');
+});
+
+it('freezes a suggested terminal name at submission while refreshed records and defaults arrive', async () => {
+  const calls: TorqueCommand[] = []; let release: (value: UnknownRecord) => void = () => { throw new Error('not pending'); };
+  vi.stubGlobal('fetch', mockFetch((_url, options) => { calls.push(commandFrom(options)); return new Promise((resolve) => { release = (value) => resolve({ ok: true, json: () => Promise.resolve(value) }); }); }));
+  const { store, close } = setup('terminal');
+  act(() => { store.dispatch(projectionActions.auxiliaryResourceReceived({ type: 'group_settings', group: 'Foundation', settings: { terminal_name_prefix: 'Console' } })); });
+  fireEvent.click(screen.getByRole('button', { name: 'Create terminal' }));
+  expect(calls[0]).toMatchObject({ cmd: 'add_terminal', name: 'Console 1' });
+  act(() => { store.dispatch(projectionActions.snapshotReceived({ ...compactStateFixture, agents: { created: { id: 'created', name: 'Console 1', kind: 'terminal', group: 'Foundation' } }, group_settings: { Foundation: { terminal_name_prefix: 'Changed' } } })); });
+  expect(screen.getByLabelText('Name')).toHaveValue('Console 1');
+  await act(async () => { release({ ok: false, error: 'QA refusal' }); await Promise.resolve(); });
+  fireEvent.click(screen.getByRole('button', { name: 'Retry same creation' })); expect(calls[1]).toEqual(calls[0]);
+  await act(async () => { release({ ok: true, data: { type: 'terminal_created', id: 'created', kind: 'terminal', name: 'Console 1', group: 'Foundation', parent_id: '' } }); await Promise.resolve(); });
+  expect(close).toHaveBeenCalledOnce();
+});

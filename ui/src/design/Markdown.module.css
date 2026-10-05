@@ -1,0 +1,9 @@
+.markdown { min-width: 0; overflow-wrap: anywhere; line-height: 1.6; }
+.markdown h1, .markdown h2, .markdown h3, .markdown h4, .markdown h5, .markdown h6 { margin: 10px 0 5px; line-height: 1.4; font-size: 1.15em; }
+.markdown h1 { font-size: 1.4em; }.markdown h2 { font-size: 1.25em; }
+.markdown p { margin: 4px 0; white-space: pre-line; }.markdown ul, .markdown ol { margin: 5px 0; padding-left: 22px; }.markdown li > p { margin: 2px 0; }
+.markdown code { padding: 1px 3px; background: var(--background); font: inherit; }
+.markdown pre { max-width: 100%; margin: 6px 0; padding: 8px; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--background); font: inherit; white-space: pre; }
+.markdown pre code { padding: 0; background: transparent; }.markdown a { color: var(--accent); text-decoration: underline; }
+.markdown blockquote { margin: 7px 0; padding: 1px 10px; border-left: 2px solid var(--border-emphasis); }
+.table { max-width: 100%; overflow: auto; }.table table { width: 100%; border-collapse: collapse; }.table th, .table td { padding: 6px; text-align: left; border: 1px solid var(--border); }
